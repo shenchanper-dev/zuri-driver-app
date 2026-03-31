@@ -70,12 +70,14 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
                 return false;
             }
 
-            // Request background permission
-            const { status: backgroundStatus } = await Location.requestBackgroundPermissionsAsync();
-
-            if (backgroundStatus !== 'granted') {
-                console.warn('Background location permission denied');
-                // Continue with foreground only
+            // ZURI-FIX 2026-03-31: requestBackgroundPermissionsAsync no existe en web — solo nativo
+            let backgroundStatus = 'denied';
+            if (Platform.OS !== 'web') {
+                const { status } = await Location.requestBackgroundPermissionsAsync(); // ZURI-FIX 2026-03-31
+                backgroundStatus = status;
+                if (backgroundStatus !== 'granted') {
+                    console.warn('Background location permission denied');
+                }
             }
 
             // Start foreground tracking
@@ -125,8 +127,8 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
                 );
             }
 
-            // Start background tracking if permission granted
-            if (backgroundStatus === 'granted') {
+            // ZURI-FIX 2026-03-31: startLocationUpdatesAsync no existe en web (ExpoLocation.web.js no lo implementa)
+            if (Platform.OS !== 'web' && backgroundStatus === 'granted') {
                 await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
                     accuracy: Location.Accuracy.Balanced,
                     distanceInterval: 50,      // Update every 50 meters in background
