@@ -42,7 +42,7 @@ class SocketService {
 
             this.socket = io(finalUrl, {
                 auth: { token },
-                transports: ['websocket', 'polling'],
+                transports: ['polling', 'websocket'], // ZURI-FIX 2026-03-30: polling primero para handshake inicial correcto con Nginx/Socket.IO
                 reconnection: true,
                 reconnectionAttempts: this.maxReconnectAttempts,
                 reconnectionDelay: 1000,

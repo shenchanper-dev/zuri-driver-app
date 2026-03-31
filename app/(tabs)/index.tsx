@@ -62,19 +62,16 @@ export default function HomeScreen() {
                     console.warn('[Home] No se pudo actualizar estadoServicio:', e);
                 }
 
-                // 4. Socket en background
-                console.log('[Home] Iniciando conexión de socket...');
-                const connected = await socket.connect();
+                // ZURI-FIX 2026-03-30: liberar el botón inmediatamente tras GPS exitoso, sin esperar al socket
+                setIsToggling(false);
 
-                if (connected) {
-                    useLocationStore.getState().setConnected(true);
-                } else {
-                    Alert.alert(
-                        'Error de conexión',
-                        'El GPS está activo pero no se pudo establecer conexión con el servidor de tiempo real. Se usará el respaldo HTTP.',
-                        [{ text: 'Entendido' }]
-                    );
-                }
+                // 4. Socket en background (sin await — no bloquea el UI)
+                socket.connect().then(connected => { // ZURI-FIX 2026-03-30: fire-and-forget, era await (bloqueaba 15s)
+                    if (connected) {
+                        useLocationStore.getState().setConnected(true);
+                    }
+                    // Sin Alert: si falla el socket el modo HTTP fallback opera silenciosamente
+                });
 
             } else {
                 // DESCONECTAR
