@@ -104,7 +104,8 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
                         maximumAge: 5000,
                     }
                 );
-                // Store watchId if needed for cleanup
+                // ZURI-FIX 2026-04-03: guardar watchId para cleanup en stopTracking
+                (set as any)({ _webWatchId: watchId });
             } else {
                 await Location.watchPositionAsync(
                     {
@@ -142,14 +143,20 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
                 });
             }
 
-            // Leer nivel de batería
-            const batteryLevel = await Battery.getBatteryLevelAsync();
-            set({ batteryLevel: batteryLevel * 100 }); // Convert 0-1 to 0-100
+            // ZURI-FIX 2026-04-03: Battery API puede lanzar excepción en navegadores
+            // que no soportan Battery Status API (Safari iOS, Firefox mobile).
+            // No debe impedir que isTracking se active.
+            try {
+                const batteryLevel = await Battery.getBatteryLevelAsync();
+                set({ batteryLevel: batteryLevel * 100 }); // Convert 0-1 to 0-100
 
-            // Suscribirse a cambios de batería
-            Battery.addBatteryLevelListener(({ batteryLevel }) => {
-                set({ batteryLevel: batteryLevel * 100 });
-            });
+                // Suscribirse a cambios de batería
+                Battery.addBatteryLevelListener(({ batteryLevel }) => {
+                    set({ batteryLevel: batteryLevel * 100 });
+                });
+            } catch (batteryError) {
+                console.warn('[Location] Battery API not available (normal on some browsers):', batteryError);
+            }
 
             set({ isTracking: true, error: null });
             return true;
@@ -165,15 +172,26 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
     // ========================================
     stopTracking: async () => {
         try {
-            // Stop background task
-            const hasStarted = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-            if (hasStarted) {
-                await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+            // ZURI-FIX 2026-04-03: TaskManager.isTaskRegisteredAsync lanza
+            // UnavailabilityError en web (web shim no lo implementa)
+            if (Platform.OS !== 'web') {
+                const hasStarted = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+                if (hasStarted) {
+                    await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
+                }
+            } else {
+                // ZURI-FIX 2026-04-03: limpiar watchPosition en web
+                const watchId = (get() as any)._webWatchId;
+                if (watchId != null && typeof navigator !== 'undefined' && navigator.geolocation) {
+                    navigator.geolocation.clearWatch(watchId);
+                    console.log('[Location] Web watchPosition cleared');
+                }
             }
 
             set({ isTracking: false });
         } catch (error) {
             console.error('Error stopping tracking:', error);
+            set({ isTracking: false }); // ZURI-FIX 2026-04-03: asegurar reset del estado incluso si hay error
         }
     },
 
