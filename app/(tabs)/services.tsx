@@ -13,6 +13,7 @@ import {
     RefreshControl,
     Alert,
     ActivityIndicator,
+    Vibration,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { driverApi } from '@/services/api';
@@ -77,6 +78,10 @@ export default function ServicesScreen() {
         // Listen for new service assignments
         socket.on('service:assigned', (data) => {
             console.log('📋 New service assigned:', data);
+
+            // ZURI-FIX 2026-04-03: Vibración fuerte para alertar al conductor
+            Vibration.vibrate([0, 500, 200, 500]);
+
             loadServices();
             // Show notification
             if (data.paciente?.nombre) {
@@ -123,6 +128,12 @@ export default function ServicesScreen() {
 
     // Reject service
     const handleReject = async (service: Service) => {
+        const doReject = async (motivo: string) => {
+            const response = await driverApi.rejectService(service.id, motivo);
+            if (response.success) {
+                loadServices();
+            }
+        };
         Alert.prompt(
             'Rechazar Servicio',
             'Motivo del rechazo (opcional):',
@@ -131,12 +142,7 @@ export default function ServicesScreen() {
                 {
                     text: 'Rechazar',
                     style: 'destructive',
-                    onPress: async (motivo) => {
-                        const response = await driverApi.rejectService(service.id, motivo || '');
-                        if (response.success) {
-                            loadServices();
-                        }
-                    },
+                    onPress: (motivo: string | undefined) => { doReject(motivo || ''); },
                 },
             ]
         );

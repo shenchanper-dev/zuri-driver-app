@@ -8,11 +8,43 @@ import { Platform } from 'react-native';
 import * as Location from 'expo-location';
 import * as TaskManager from 'expo-task-manager';
 import * as Battery from 'expo-battery';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { socket } from '@/services/socket';
 import { useAuthStore } from '@/stores/auth';
 
 // Background task name
 const LOCATION_TASK_NAME = 'ZURI_BACKGROUND_LOCATION';
+
+// Clave AsyncStorage para persistir estado del turno y conductorId
+const TURNO_ACTIVO_KEY = 'zuri_turno_activo';
+const CONDUCTOR_ID_KEY  = 'zuri_conductor_id';
+
+// ============================================================================
+// Offline location queue (in-memory fallback — no extra packages needed)
+// ============================================================================
+const MAX_PENDING_LOCATIONS = 50;
+const pendingLocations: Array<{ conductorId: number; data: any; queuedAt: number }> = [];
+
+function flushPendingLocations() {
+    if (pendingLocations.length === 0) return;
+    const toSend = pendingLocations.splice(0); // drain the queue
+    toSend.forEach(({ conductorId, data }) => {
+        socket.emit('driver:location:update', { conductorId, ...data });
+    });
+    console.log(`📤 [Location] Flushed ${toSend.length} queued location(s) after reconnect`);
+}
+
+function sendLocationViaSocket(conductorId: number, data: any) {
+    if (socket.isConnected) {
+        flushPendingLocations(); // send any buffered locations first
+        socket.emit('driver:location:update', { conductorId, ...data });
+    } else {
+        if (pendingLocations.length < MAX_PENDING_LOCATIONS) {
+            pendingLocations.push({ conductorId, data, queuedAt: Date.now() });
+        }
+        // Fall through — HTTP backup in updateLocation will persist the data
+    }
+}
 
 // ============================================================================
 // Types
@@ -42,6 +74,11 @@ interface LocationState {
     updateLocation: (location: LocationData) => void;
     setBatteryLevel: (level: number) => void;
     setConnected: (connected: boolean) => void;
+
+    // Turno (aliases con persistencia)
+    iniciarTurno: () => Promise<boolean>;
+    finalizarTurno: () => Promise<void>;
+    verificarTurnoPeristido: () => Promise<boolean>;
 }
 
 // ============================================================================
@@ -204,17 +241,16 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
             lastUpdate: location.timestamp
         });
 
-        // Send to WebSocket if connected
+        // Send to WebSocket (with offline queue fallback)
         const conductorId = useAuthStore.getState().conductor?.id;
-        if (get().isConnected && conductorId) {
-            socket.emit('driver:location:update', {
-                conductorId,
+        if (conductorId) {
+            sendLocationViaSocket(conductorId, {
                 latitude: location.latitude,
                 longitude: location.longitude,
                 heading: location.heading,
                 speed: location.speed,
                 accuracy: location.accuracy,
-                batteryLevel: get().batteryLevel
+                batteryLevel: get().batteryLevel,
             });
         }
 
@@ -244,48 +280,134 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
     // ========================================
     // Connection Status
     // ========================================
-    setConnected: (connected) => set({ isConnected: connected })
+    setConnected: (connected) => set({ isConnected: connected }),
+
+    // ========================================================================
+    // iniciarTurno — pide permisos, arranca GPS foreground + background,
+    // persiste el estado en AsyncStorage para poder reanudarlo al reiniciar app.
+    // ========================================================================
+    iniciarTurno: async () => {
+        try {
+            // Persistir conductorId en AsyncStorage para que el background task lo lea
+            const conductorId = useAuthStore.getState().conductor?.id;
+            if (conductorId) {
+                await AsyncStorage.setItem(CONDUCTOR_ID_KEY, String(conductorId));
+            }
+
+            const ok = await get().startTracking();
+            if (ok) {
+                await AsyncStorage.setItem(TURNO_ACTIVO_KEY, 'true');
+            }
+            return ok;
+        } catch (err) {
+            console.error('[Location] iniciarTurno error:', err);
+            return false;
+        }
+    },
+
+    // ========================================================================
+    // finalizarTurno — detiene GPS y limpia el estado persistido.
+    // ========================================================================
+    finalizarTurno: async () => {
+        try {
+            await get().stopTracking();
+            await AsyncStorage.removeItem(TURNO_ACTIVO_KEY);
+        } catch (err) {
+            console.error('[Location] finalizarTurno error:', err);
+        }
+    },
+
+    // ========================================================================
+    // verificarTurnoPeristido — al iniciar la app comprueba si había turno
+    // activo y, si la tarea background sigue corriendo, reactiva el estado.
+    // ========================================================================
+    verificarTurnoPeristido: async () => {
+        try {
+            const valor = await AsyncStorage.getItem(TURNO_ACTIVO_KEY);
+            if (valor !== 'true') return false;
+
+            // En nativo verificar si la tarea background está registrada
+            if (Platform.OS !== 'web') {
+                const tareaActiva = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+                if (tareaActiva) {
+                    // La tarea ya corre en background: solo sincronizar estado en memoria
+                    set({ isTracking: true });
+                    console.log('[Location] Turno reanudado — tarea background activa');
+                    return true;
+                }
+                // La tarea no está activa aunque haya flag → rearrancar GPS completo
+                console.log('[Location] Turno persistido pero tarea inactiva — reiniciando GPS');
+                return get().iniciarTurno();
+            }
+            return false;
+        } catch (err) {
+            console.error('[Location] verificarTurnoPeristido error:', err);
+            return false;
+        }
+    },
 }));
 
 // ============================================================================
 // Background Task Definition (solo para móvil nativo)
 // ============================================================================
 
-// Solo definir el task en plataformas móviles nativas
+// Solo definir el task en plataformas móviles nativas.
+// IMPORTANTE: defineTask DEBE estar en el top-level del módulo (fuera de funciones/componentes).
 if (Platform.OS !== 'web') {
     TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: any) => {
         if (error) {
-            console.error('Background location error:', error);
+            console.error('[GPS BG]', error.message);
             return;
         }
+        if (!data?.locations?.length) return;
 
-        if (data) {
-            const { locations } = data;
-            const location = locations[0];
+        const loc = data.locations[0];
 
-            if (location) {
-                // Send to server via HTTP (WebSocket may not be available in background)
-                try {
-                    const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL || 'https://admin.zuri.pe/api'}/drivers/location`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            latitude: location.coords.latitude,
-                            longitude: location.coords.longitude,
-                            heading: location.coords.heading,
-                            speed: location.coords.speed,
-                            accuracy: location.coords.accuracy,
-                            timestamp: new Date(location.timestamp).toISOString()
-                        })
-                    });
-
-                    if (!response.ok) {
-                        console.error('Background location update failed');
-                    }
-                } catch (err) {
-                    console.error('Background location HTTP error:', err);
-                }
+        try {
+            // Obtener conductorId persistido en AsyncStorage (único storage accesible en background)
+            const conductorIdStr = await AsyncStorage.getItem(CONDUCTOR_ID_KEY);
+            const conductorId = conductorIdStr ? parseInt(conductorIdStr, 10) : null;
+            if (!conductorId) {
+                console.warn('[GPS BG] Sin conductorId en AsyncStorage — descartando ubicación');
+                return;
             }
+
+            const velocidadKmh = loc.coords.speed != null && loc.coords.speed >= 0
+                ? loc.coords.speed * 3.6
+                : null;
+
+            // Intentar WebSocket si está disponible
+            if (socket.isConnected) {
+                socket.emit('driver:location:update', {
+                    conductorId,
+                    latitude: loc.coords.latitude,
+                    longitude: loc.coords.longitude,
+                    heading: loc.coords.heading,
+                    speed: velocidadKmh,
+                    accuracy: loc.coords.accuracy,
+                });
+            }
+
+            // Siempre hacer fallback HTTP para garantizar persistencia en BD
+            const apiBase = process.env.EXPO_PUBLIC_API_URL || 'https://admin.zuri.pe/api';
+            const response = await fetch(`${apiBase}/conductores/gps-tracking`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    conductorId,
+                    latitud: loc.coords.latitude,
+                    longitud: loc.coords.longitude,
+                    precision: loc.coords.accuracy,
+                    velocidad: velocidadKmh,
+                    rumbo: loc.coords.heading,
+                }),
+            });
+
+            if (!response.ok) {
+                console.error('[GPS BG] HTTP update failed:', response.status);
+            }
+        } catch (err) {
+            console.error('[GPS BG] Error enviando ubicación:', err);
         }
     });
 }

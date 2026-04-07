@@ -59,6 +59,10 @@ interface Conductor {
         version?: string;
         biometriaEnabled?: boolean;
     };
+    metricas?: {
+        calificacion?: number;
+        totalServicios?: number;
+    };
 }
 
 interface AuthState {
@@ -74,7 +78,7 @@ interface AuthState {
     loginWithBiometrics: () => Promise<boolean>;
     registerPin: (dni: string, pin: string, enableBiometrics: boolean) => Promise<{ success: boolean; message?: string; requiresVerification?: boolean }>;
     verifyPin: (dni: string, code: string, pin: string, enableBiometrics: boolean) => Promise<boolean>;
-    resetPin: (data: { dni: string; celular?: string; nuevoPin?: string; confirmarPin?: string; step?: 'verify' | 'reset' }) => Promise<{ success: boolean; message?: string; verified?: boolean }>;
+    resetPin: (data: { dni: string; celular?: string; nuevoPin?: string; confirmarPin?: string; step?: 'verify' | 'reset' }) => Promise<{ success: boolean; message?: string; verified?: boolean; conductorNombre?: string }>;
     logout: () => Promise<void>;
     checkAuth: () => Promise<boolean>;
     checkBiometrics: () => Promise<boolean>;

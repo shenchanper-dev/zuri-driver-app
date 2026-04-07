@@ -16,6 +16,7 @@ class SocketService {
     private socket: Socket | null = null;
     private reconnectAttempts = 0;
     private maxReconnectAttempts = 10;
+    private currentConductorId: number | null = null;
 
     /**
      * Connect to WebSocket server
@@ -44,10 +45,10 @@ class SocketService {
                 auth: { token },
                 transports: ['polling', 'websocket'], // ZURI-FIX 2026-03-30: polling primero para handshake inicial correcto con Nginx/Socket.IO
                 reconnection: true,
-                reconnectionAttempts: this.maxReconnectAttempts,
+                reconnectionAttempts: Infinity,
                 reconnectionDelay: 1000,
-                reconnectionDelayMax: 5000,
-                timeout: 20000,
+                reconnectionDelayMax: 30000,
+                timeout: 10000,
                 path: '/socket.io/', // Con barra diagonal para coincidir con Nginx
             });
 
@@ -76,7 +77,8 @@ class SocketService {
                 });
 
                 this.socket.on('connect_error', (error) => {
-                    console.error('❌ [SocketService] Connection error:', error.message, error.description || '');
+                    const errDesc = (error as Error & { description?: string }).description ?? '';
+                    console.error('❌ [SocketService] Connection error:', error.message, errDesc);
                     this.reconnectAttempts++;
 
                     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
@@ -93,6 +95,13 @@ class SocketService {
     }
 
     /**
+     * Store the current conductor ID so it can be re-registered after reconnection
+     */
+    setDriverId(conductorId: number) {
+        this.currentConductorId = conductorId;
+    }
+
+    /**
      * Setup event listeners
      */
     private setupEventListeners() {
@@ -104,6 +113,11 @@ class SocketService {
 
         this.socket.on('reconnect', (attemptNumber) => {
             console.log('🔌 Socket reconnected after', attemptNumber, 'attempts');
+            // Re-register driver after reconnection so the server tracks the new socket ID
+            if (this.currentConductorId) {
+                this.socket?.emit('driver:register', { conductorId: this.currentConductorId });
+                console.log('🔌 Re-registered driver:', this.currentConductorId);
+            }
         });
 
         this.socket.on('error', (error) => {
@@ -117,8 +131,8 @@ class SocketService {
         });
 
         // Location acknowledgment
-        this.socket.on('driver:location:ack', (data) => {
-            // console.log('📍 Location update acknowledged:', data.timestamp);
+        this.socket.on('driver:location:ack', (_data) => {
+            // console.log('📍 Location update acknowledged:', _data.timestamp);
         });
 
         // Status acknowledgment

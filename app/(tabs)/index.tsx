@@ -26,7 +26,7 @@ import { socket } from '@/services/socket';
 export default function HomeScreen() {
     const router = useRouter();
     const { conductor } = useAuthStore();
-    const { isTracking, startTracking, stopTracking, isConnected } = useLocationStore();
+    const { isTracking, iniciarTurno, finalizarTurno, verificarTurnoPeristido, isConnected } = useLocationStore();
 
     // El estado online visual ahora depende de si el GPS está trackeando 
     // Y opcionalmente si el socket está conectado (decisión de UX)
@@ -36,6 +36,7 @@ export default function HomeScreen() {
     const [currentService, setCurrentService] = useState<any>(null);
     const [refreshing, setRefreshing] = useState(false);
     const [todayStats, setTodayStats] = useState({ viajes: 0, km: 0 });
+    const [pendingCount, setPendingCount] = useState(0);
 
     // ── Conectar: GPS primero → UI verde → socket en background ──
     const handleToggleStatus = async () => {
@@ -44,8 +45,8 @@ export default function HomeScreen() {
 
         try {
             if (!isOnline) {
-                // 1. Pedir permisos + arrancar GPS
-                const gpsOk = await startTracking();
+                // 1. Pedir permisos + arrancar GPS (persiste conductorId y turno activo)
+                const gpsOk = await iniciarTurno();
                 if (!gpsOk) {
                     Alert.alert(
                         'GPS no disponible',
@@ -55,7 +56,7 @@ export default function HomeScreen() {
                     return;
                 }
 
-                // 3. Actualizar estado en el servidor (HTTP fallback)
+                // 2. Actualizar estado en el servidor (HTTP fallback)
                 try {
                     await driverApi.updateProfile({ estadoServicio: 'DISPONIBLE' });
                 } catch (e) {
@@ -65,7 +66,7 @@ export default function HomeScreen() {
                 // ZURI-FIX 2026-03-30: liberar el botón inmediatamente tras GPS exitoso, sin esperar al socket
                 setIsToggling(false);
 
-                // 4. Socket en background (sin await — no bloquea el UI)
+                // 3. Socket en background (sin await — no bloquea el UI)
                 socket.connect().then(connected => { // ZURI-FIX 2026-03-30: fire-and-forget, era await (bloqueaba 15s)
                     if (connected) {
                         useLocationStore.getState().setConnected(true);
@@ -75,7 +76,7 @@ export default function HomeScreen() {
 
             } else {
                 // DESCONECTAR
-                await stopTracking();
+                await finalizarTurno();
                 useLocationStore.getState().setConnected(false);
                 socket.disconnect();
 
@@ -93,11 +94,18 @@ export default function HomeScreen() {
     // ── Servicio activo ──
     const loadActiveService = useCallback(async () => {
         try {
-            const response = await driverApi.getServices({ estado: 'activo' });
-            if (response.success && response.servicios?.length > 0) {
-                setCurrentService(response.servicios[0]);
+            // Cargar activo
+            const activeRes = await driverApi.getServices({ estado: 'activo' });
+            if (activeRes.success && activeRes.servicios?.length > 0) {
+                setCurrentService(activeRes.servicios[0]);
             } else {
                 setCurrentService(null);
+            }
+
+            // Cargar pendientes (para el badge/alerta)
+            const pendingRes = await driverApi.getServices({ estado: 'pendiente' });
+            if (pendingRes.success) {
+                setPendingCount(pendingRes.servicios?.length || 0);
             }
         } catch (e) {
             console.warn('[Home] No se pudo cargar el servicio activo');
@@ -111,6 +119,17 @@ export default function HomeScreen() {
     };
 
     useEffect(() => {
+        // Auto-reanudación: si había turno activo antes de cerrar la app, reanudarlo
+        verificarTurnoPeristido().then(reanudado => {
+            if (reanudado) {
+                console.log('[Home] Turno reanudado automáticamente');
+                // Reconectar socket en background
+                socket.connect().then(connected => {
+                    if (connected) useLocationStore.getState().setConnected(true);
+                });
+            }
+        });
+
         loadActiveService();
 
         socket.on('service:assigned', () => loadActiveService());
@@ -164,6 +183,23 @@ export default function HomeScreen() {
                     )}
                 </View>
             </View>
+
+            {/* ── Alerta: Nuevas Asignaciones ── */}
+            {!currentService && pendingCount > 0 && (
+                <TouchableOpacity
+                    style={styles.pendingAlert}
+                    onPress={() => router.push('/(tabs)/services')}
+                >
+                    <View style={styles.pendingBadge}>
+                        <Ionicons name="notifications" size={20} color="#fff" />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                        <Text style={styles.pendingTitle}>Tienes {pendingCount} asignación{pendingCount > 1 ? 'es' : ''} nueva{pendingCount > 1 ? 's' : ''}</Text>
+                        <Text style={styles.pendingSubtext}>Toca para ver y aceptar</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={20} color="#F59E0B" />
+                </TouchableOpacity>
+            )}
 
             {/* ── Servicio activo / Esperando ── */}
             {currentService ? (
@@ -305,4 +341,33 @@ const styles = StyleSheet.create({
     vehicleTitle: { fontSize: 16, fontWeight: '600', color: '#1F2937' },
     vehiclePlate: { fontSize: 28, fontWeight: 'bold', color: '#0066CC', letterSpacing: 2 },
     vehicleDetail: { fontSize: 14, color: '#6B7280', marginTop: 4 },
+    pendingAlert: {
+        backgroundColor: '#FFFBEB',
+        marginHorizontal: 16,
+        marginBottom: 16,
+        padding: 16,
+        borderRadius: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+        borderWidth: 1,
+        borderColor: '#FEF3C7',
+    },
+    pendingBadge: {
+        backgroundColor: '#F59E0B',
+        width: 36,
+        height: 36,
+        borderRadius: 18,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    pendingTitle: {
+        fontSize: 16,
+        fontWeight: 'bold',
+        color: '#92400E',
+    },
+    pendingSubtext: {
+        fontSize: 13,
+        color: '#B45309',
+    },
 });

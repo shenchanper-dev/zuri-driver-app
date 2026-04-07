@@ -19,5 +19,9 @@
         ".expo/types/**/*.ts",
         "expo-env.d.ts"
     ],
+    "exclude": [
+        "node_modules",
+        "zuri"
+    ],
     "extends": "expo/tsconfig.base"
 }
