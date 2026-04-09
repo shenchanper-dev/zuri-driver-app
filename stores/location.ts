@@ -167,16 +167,25 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
 
             // ZURI-FIX 2026-03-31: startLocationUpdatesAsync no existe en web (ExpoLocation.web.js no lo implementa)
             if (Platform.OS !== 'web' && backgroundStatus === 'granted') {
+                // Detener tarea previa si estaba corriendo (evita duplicados)
+                const yaActiva = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => false);
+                if (yaActiva) {
+                    await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => {});
+                }
+
                 await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
                     accuracy: Location.Accuracy.Balanced,
-                    distanceInterval: 50,      // Update every 50 meters in background
-                    timeInterval: 30000,       // Or every 30 seconds
+                    distanceInterval: 20,       // cada 20 metros
+                    timeInterval: 15000,        // o cada 15 segundos
+                    deferredUpdatesInterval: 0,
                     showsBackgroundLocationIndicator: true,
+                    pausesUpdatesAutomatically: false,
+                    activityType: Location.ActivityType.AutomotiveNavigation,
                     foregroundService: {
-                        notificationTitle: 'ZURI Tracking Activo',
-                        notificationBody: 'Tu ubicación se está compartiendo',
-                        notificationColor: '#0066CC'
-                    }
+                        notificationTitle: '🚗 ZURI — Turno Activo',
+                        notificationBody: 'GPS activo · Tu posición se está compartiendo',
+                        notificationColor: '#667eea',
+                    },
                 });
             }
 
