@@ -56,6 +56,9 @@
         "googleMaps": {
           "apiKey": ""
         }
+      },
+      "foregroundService": {
+        "type": "location"
       }
     },
     "plugins": [
