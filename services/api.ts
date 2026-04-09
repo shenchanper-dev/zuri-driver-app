@@ -196,9 +196,12 @@ export const driverApi = {
     updateServiceStatus: (servicioId: number, nuevoEstado: string, ubicacion?: any) =>
         api.authPatch('/drivers/services', { servicioId, nuevoEstado, ubicacion }),
 
-    // Programacion detalles — aceptar/rechazar asignación
+    // Programacion detalles — aceptar/rechazar/avanzar estado
     responderProgramacion: (detalleId: number, accion: 'ACEPTAR' | 'RECHAZAR', motivo?: string) =>
         api.authPatch('/drivers/programacion', { detalleId, accion, motivo }),
+
+    avanzarProgramacion: (detalleId: number, accion: 'EN_CAMINO' | 'EN_ORIGEN' | 'EN_TRANSPORTE' | 'EN_DESTINO' | 'COMPLETAR') =>
+        api.authPatch('/drivers/programacion', { detalleId, accion }),
 
     // Location
     updateLocation: (data: any) =>

@@ -32,18 +32,24 @@ interface Service {
     id: number;
     codigo: string;
     estado: string;
+    fuente: 'SERVICIO' | 'PROGRAMACION'; // tabla de origen
     tipoServicio: string;
     prioridad: string;
     fechaHora: string;
-    tiempoEstimado: number;
-    distanciaEstimada: number;
+    tiempoEstimado: number | null;
+    distanciaEstimada: number | null;
+    // Para programaciones
+    doctor_nombre?: string;
+    turno?: string;
+    hora_inicio?: string;
+    hora_fin?: string;
     paciente: {
         nombre: string;
         telefono?: string;
         observaciones?: string;
     };
-    origen: { direccion: string; latitud: number; longitud: number };
-    destino: { direccion: string; latitud: number; longitud: number };
+    origen: { direccion: string; latitud: number; longitud: number; referencia?: string };
+    destino: { direccion: string; latitud: number; longitud: number; referencia?: string };
     clinica: { nombre: string; telefono?: string };
     timestamps?: {
         asignado?: string;
@@ -281,6 +287,15 @@ export default function ServicesScreen() {
         const siguiente = SIGUIENTE_ESTADO[service.estado];
         if (!siguiente) return;
 
+        // Mapear estado BD → accion para programacion_detalles
+        const accionProgramacion: Record<string, 'EN_CAMINO' | 'EN_ORIGEN' | 'EN_TRANSPORTE' | 'EN_DESTINO' | 'COMPLETAR'> = {
+            EN_CAMINO:    'EN_CAMINO',
+            EN_ORIGEN:    'EN_ORIGEN',
+            EN_TRANSPORTE:'EN_TRANSPORTE',
+            EN_DESTINO:   'EN_DESTINO',
+            COMPLETADO:   'COMPLETAR',
+        };
+
         Alert.alert(
             siguiente.label,
             `¿Confirmar: "${siguiente.label}"?`,
@@ -289,7 +304,14 @@ export default function ServicesScreen() {
                 {
                     text: 'Confirmar',
                     onPress: async () => {
-                        const res = await driverApi.updateServiceStatus(service.id, siguiente.estado);
+                        let res: any;
+                        if (service.fuente === 'PROGRAMACION') {
+                            const accion = accionProgramacion[siguiente.estado];
+                            if (!accion) return;
+                            res = await driverApi.avanzarProgramacion(service.id, accion);
+                        } else {
+                            res = await driverApi.updateServiceStatus(service.id, siguiente.estado);
+                        }
                         if (res.success) {
                             loadServices();
                             if (siguiente.estado === 'COMPLETADO') setActiveTab('historial');
@@ -438,11 +460,16 @@ export default function ServicesScreen() {
                     <Text style={styles.serviceCode}>{item.codigo}</Text>
                 </View>
 
-                {/* Paciente */}
+                {/* Médico / Paciente */}
                 <View style={styles.patientRow}>
-                    <Ionicons name="person" size={20} color="#333" />
+                    <Ionicons name={item.fuente === 'PROGRAMACION' ? 'medkit' : 'person'} size={20} color="#333" />
                     <View style={styles.patientInfo}>
                         <Text style={styles.patientName}>{item.paciente.nombre}</Text>
+                        {item.fuente === 'PROGRAMACION' && item.hora_inicio && (
+                            <Text style={styles.patientPhone}>
+                                {item.turno ? `Turno ${item.turno} · ` : ''}{item.hora_inicio} — {item.hora_fin}
+                            </Text>
+                        )}
                         {item.paciente.telefono && (
                             <Text style={styles.patientPhone}>{item.paciente.telefono}</Text>
                         )}
@@ -452,6 +479,11 @@ export default function ServicesScreen() {
                             </Text>
                         ) : null}
                     </View>
+                    {item.fuente === 'PROGRAMACION' && (
+                        <View style={{ backgroundColor: '#EFF6FF', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 }}>
+                            <Text style={{ fontSize: 10, color: '#1D4ED8', fontWeight: '700' }}>PROG</Text>
+                        </View>
+                    )}
                 </View>
 
                 {/* Direcciones */}
