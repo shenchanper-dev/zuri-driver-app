@@ -99,33 +99,57 @@ const ESTADO_LABEL: Record<string, string> = {
     INCIDENTE: '⚠️ Incidente',
 };
 
+// Uber Health palette
+const COLORS = {
+    primary: '#00A878',
+    primaryDark: '#007A58',
+    surface: '#FFFFFF',
+    surfaceAlt: '#F8FAFB',
+    border: '#E8EDF2',
+    textPrimary: '#1A2332',
+    textSecondary: '#6B7A8D',
+    shadow: 'rgba(0,0,0,0.08)',
+};
+
+const STATUS_CONFIG: Record<string, { bg: string; text: string }> = {
+    ASIGNADO:      { bg: '#FFF8E7', text: '#92400E' },
+    ACEPTADO:      { bg: '#F0FDF4', text: '#15803D' },
+    EN_CAMINO:     { bg: '#EFF6FF', text: '#1D4ED8' },
+    EN_ORIGEN:     { bg: '#FFF7ED', text: '#C2410C' },
+    EN_TRANSPORTE: { bg: '#F5F3FF', text: '#6D28D9' },
+    EN_DESTINO:    { bg: '#ECFDF5', text: '#065F46' },
+    COMPLETADO:    { bg: '#F0FDF4', text: '#166534' },
+    CANCELADO:     { bg: '#FEF2F2', text: '#DC2626' },
+    INCIDENTE:     { bg: '#FEF2F2', text: '#DC2626' },
+};
+
 const ESTADO_COLOR: Record<string, string> = {
     ASIGNADO: '#F59E0B',
-    ACEPTADO: '#3B82F6',
-    EN_CAMINO: '#8B5CF6',
-    EN_ORIGEN: '#EC4899',
-    EN_TRANSPORTE: '#0066CC',
-    EN_DESTINO: '#10B981',
+    ACEPTADO: '#10B981',
+    EN_CAMINO: '#3B82F6',
+    EN_ORIGEN: '#F97316',
+    EN_TRANSPORTE: '#8B5CF6',
+    EN_DESTINO: '#059669',
     COMPLETADO: '#059669',
     CANCELADO: '#EF4444',
     INCIDENTE: '#DC2626',
 };
 
 const SIGUIENTE_ESTADO: Record<string, { label: string; estado: string; icon: string }> = {
-    ACEPTADO:     { label: 'Iniciar viaje',        estado: 'EN_CAMINO',    icon: 'navigate' },
-    EN_CAMINO:    { label: 'Llegué al origen',      estado: 'EN_ORIGEN',    icon: 'location' },
-    EN_ORIGEN:    { label: 'Paciente abordo',       estado: 'EN_TRANSPORTE', icon: 'person-add' },
-    EN_TRANSPORTE:{ label: 'Llegué al destino',     estado: 'EN_DESTINO',   icon: 'flag' },
-    EN_DESTINO:   { label: 'Completar servicio',    estado: 'COMPLETADO',   icon: 'checkmark-circle' },
+    ACEPTADO: { label: 'Iniciar viaje', estado: 'EN_CAMINO', icon: 'navigate' },
+    EN_CAMINO: { label: 'Llegué al origen', estado: 'EN_ORIGEN', icon: 'location' },
+    EN_ORIGEN: { label: 'Paciente abordo', estado: 'EN_TRANSPORTE', icon: 'person-add' },
+    EN_TRANSPORTE: { label: 'Llegué al destino', estado: 'EN_DESTINO', icon: 'flag' },
+    EN_DESTINO: { label: 'Completar servicio', estado: 'COMPLETADO', icon: 'checkmark-circle' },
 };
 
 const PASOS_VIAJE = [
-    { estado: 'ACEPTADO',      label: 'Aceptado' },
-    { estado: 'EN_CAMINO',     label: 'En camino' },
-    { estado: 'EN_ORIGEN',     label: 'En origen' },
+    { estado: 'ACEPTADO', label: 'Aceptado' },
+    { estado: 'EN_CAMINO', label: 'En camino' },
+    { estado: 'EN_ORIGEN', label: 'En origen' },
     { estado: 'EN_TRANSPORTE', label: 'Abordo' },
-    { estado: 'EN_DESTINO',    label: 'En destino' },
-    { estado: 'COMPLETADO',    label: 'Completado' },
+    { estado: 'EN_DESTINO', label: 'En destino' },
+    { estado: 'COMPLETADO', label: 'Completado' },
 ];
 
 // ============================================================================
@@ -140,10 +164,11 @@ export default function ServicesScreen() {
 
     // Notificación de nueva asignación (programacion_detalle)
     const [nuevaAsignacion, setNuevaAsignacion] = useState<ProgramacionAsignada | null>(null);
+    const [showModalAsignacion, setShowModalAsignacion] = useState(false);
     const [countdown, setCountdown] = useState(COUNTDOWN_SEGUNDOS);
-    const [rechazoModalVisible, setRechazoModalVisible] = useState(false);
-    const [motivoRechazo, setMotivoRechazo] = useState('');
     const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // Nagging interval: reaparece cada 3 min si conductor no acepta
+    const nagIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
     // ── Cargar servicios ────────────────────────────────────────────────────
     const loadServices = useCallback(async () => {
@@ -168,13 +193,8 @@ export default function ServicesScreen() {
             setCountdown(prev => {
                 if (prev <= 1) {
                     clearInterval(countdownRef.current!);
-                    // Auto-rechazar si no responde
-                    setNuevaAsignacion(na => {
-                        if (na) {
-                            driverApi.responderProgramacion(na.id, 'RECHAZAR', 'Sin respuesta (timeout)').catch(() => {});
-                        }
-                        return null;
-                    });
+                    // NO rechazar — solo cerrar el modal; nagging lo reabrirá en 3 min
+                    setShowModalAsignacion(false);
                     return 0;
                 }
                 return prev - 1;
@@ -189,6 +209,24 @@ export default function ServicesScreen() {
         }
     }, []);
 
+    // ── Nagging: reabre el modal cada 3 min con vibración ──────────────────
+    const clearNagging = useCallback(() => {
+        if (nagIntervalRef.current) {
+            clearInterval(nagIntervalRef.current);
+            nagIntervalRef.current = null;
+        }
+    }, []);
+
+    const startNagging = useCallback((asignacion: ProgramacionAsignada) => {
+        clearNagging();
+        nagIntervalRef.current = setInterval(() => {
+            Vibration.vibrate([0, 400, 200, 400, 200, 400]);
+            setNuevaAsignacion(asignacion);
+            setShowModalAsignacion(true);
+            iniciarCountdown();
+        }, 3 * 60 * 1000); // 3 minutos
+    }, [clearNagging, iniciarCountdown]);
+
     // ── Socket events ───────────────────────────────────────────────────────
     useEffect(() => {
         requestNotificationPermissions();
@@ -200,9 +238,12 @@ export default function ServicesScreen() {
 
             // Si viene de programacion_detalle
             if (data.tipo === 'programacion_detalle') {
-                setNuevaAsignacion(data as ProgramacionAsignada);
+                const asignacion = data as ProgramacionAsignada;
+                setNuevaAsignacion(asignacion);
+                setShowModalAsignacion(true);
                 setActiveTab('pendientes');
                 iniciarCountdown();
+                startNagging(asignacion);
             } else {
                 // Servicio clásico (tabla servicios)
                 loadServices();
@@ -224,13 +265,14 @@ export default function ServicesScreen() {
             socket.off('service:assigned');
             socket.off('service:updated');
             limpiarCountdown();
+            clearNagging();
         };
-    }, [loadServices, iniciarCountdown, limpiarCountdown]);
+    }, [loadServices, iniciarCountdown, limpiarCountdown, startNagging, clearNagging]);
 
     // ── Filtros por tab ─────────────────────────────────────────────────────
     const serviciosFiltrados = services.filter(s => {
         if (activeTab === 'pendientes') return ESTADOS_PENDIENTE.includes(s.estado);
-        if (activeTab === 'activos')   return ESTADOS_ACTIVO.includes(s.estado);
+        if (activeTab === 'activos') return ESTADOS_ACTIVO.includes(s.estado);
         return ESTADOS_HISTORIAL.includes(s.estado);
     });
 
@@ -266,9 +308,9 @@ export default function ServicesScreen() {
             'Rechazar Servicio',
             'Selecciona el motivo:',
             [
-                { text: 'Fuera de zona',    onPress: () => doRechazar(service, 'Fuera de zona') },
+                { text: 'Fuera de zona', onPress: () => doRechazar(service, 'Fuera de zona') },
                 { text: 'Vehículo con falla', onPress: () => doRechazar(service, 'Vehículo con falla') },
-                { text: 'Otro motivo',      onPress: () => doRechazar(service, 'Otro') },
+                { text: 'Otro motivo', onPress: () => doRechazar(service, 'Otro') },
                 { text: 'Cancelar', style: 'cancel' },
             ]
         );
@@ -289,11 +331,11 @@ export default function ServicesScreen() {
 
         // Mapear estado BD → accion para programacion_detalles
         const accionProgramacion: Record<string, 'EN_CAMINO' | 'EN_ORIGEN' | 'EN_TRANSPORTE' | 'EN_DESTINO' | 'COMPLETAR'> = {
-            EN_CAMINO:    'EN_CAMINO',
-            EN_ORIGEN:    'EN_ORIGEN',
-            EN_TRANSPORTE:'EN_TRANSPORTE',
-            EN_DESTINO:   'EN_DESTINO',
-            COMPLETADO:   'COMPLETAR',
+            EN_CAMINO: 'EN_CAMINO',
+            EN_ORIGEN: 'EN_ORIGEN',
+            EN_TRANSPORTE: 'EN_TRANSPORTE',
+            EN_DESTINO: 'EN_DESTINO',
+            COMPLETADO: 'COMPLETAR',
         };
 
         Alert.alert(
@@ -328,31 +370,21 @@ export default function ServicesScreen() {
     const handleAceptarProgramacion = async () => {
         if (!nuevaAsignacion) return;
         limpiarCountdown();
+        clearNagging();
         const res = await driverApi.responderProgramacion(nuevaAsignacion.id, 'ACEPTAR');
         if (res.success) {
             Alert.alert('✅ Aceptado', `Servicio aceptado: ${nuevaAsignacion.doctor}`);
             setNuevaAsignacion(null);
+            setShowModalAsignacion(false);
             loadServices();
         } else {
             Alert.alert('Error', res.error || 'No se pudo aceptar');
         }
     };
 
-    const handleRechazarProgramacion = (motivo: string) => {
-        if (!nuevaAsignacion) return;
-        limpiarCountdown();
-        driverApi.responderProgramacion(nuevaAsignacion.id, 'RECHAZAR', motivo)
-            .then(res => {
-                if (!res.success) Alert.alert('Error', res.error || 'Error al rechazar');
-            })
-            .catch(() => {});
-        setNuevaAsignacion(null);
-        setRechazoModalVisible(false);
-    };
-
     // ── Render: modal de nueva asignación (programacion_detalle) ───────────
     const renderNuevaAsignacion = () => {
-        if (!nuevaAsignacion) return null;
+        if (!nuevaAsignacion || !showModalAsignacion) return null;
         const segundos = String(countdown % 60).padStart(2, '0');
         const minutos = String(Math.floor(countdown / 60)).padStart(2, '0');
         const urgente = countdown <= 10;
@@ -371,9 +403,9 @@ export default function ServicesScreen() {
                             <InfoRow icon="person" text={`Dr. ${nuevaAsignacion.doctor}`} bold />
                             <InfoRow icon="business" text={nuevaAsignacion.cliente || '—'} />
                             {nuevaAsignacion.turno ? (
-                                <InfoRow icon="time" text={`${nuevaAsignacion.turno}: ${nuevaAsignacion.horaInicio?.slice(0,5)} — ${nuevaAsignacion.horaFin?.slice(0,5)}`} />
+                                <InfoRow icon="time" text={`${nuevaAsignacion.turno}: ${nuevaAsignacion.horaInicio?.slice(0, 5)} — ${nuevaAsignacion.horaFin?.slice(0, 5)}`} />
                             ) : (
-                                <InfoRow icon="time" text={`${nuevaAsignacion.horaInicio?.slice(0,5)} — ${nuevaAsignacion.horaFin?.slice(0,5)}`} />
+                                <InfoRow icon="time" text={`${nuevaAsignacion.horaInicio?.slice(0, 5)} — ${nuevaAsignacion.horaFin?.slice(0, 5)}`} />
                             )}
                             {nuevaAsignacion.distrito ? (
                                 <InfoRow icon="location" text={nuevaAsignacion.distrito} />
@@ -389,26 +421,22 @@ export default function ServicesScreen() {
                         {/* Countdown */}
                         <View style={[styles.countdownRow, urgente && styles.countdownUrgente]}>
                             <Ionicons name="timer-outline" size={18} color={urgente ? '#DC2626' : '#F59E0B'} />
-                            <Text style={[styles.countdownText, urgente && styles.countdownUrgente]}>
+                            <Text style={[styles.countdownText, urgente && styles.countdownUrgenteText]}>
                                 {' '}Responder en: {minutos}:{segundos}
                             </Text>
                         </View>
 
-                        {/* Botones */}
+                        {/* Nota: sin botón de rechazo — el servicio reaparecerá cada 3 min */}
+                        <Text style={styles.nagHint}>El servicio volverá a notificarte si no aceptas</Text>
+
+                        {/* Botón ACEPTAR (único) */}
                         <View style={styles.asignacionBotones}>
-                            <TouchableOpacity
-                                style={[styles.btnAccion, styles.btnRechazar]}
-                                onPress={() => setRechazoModalVisible(true)}
-                            >
-                                <Ionicons name="close-circle" size={20} color="#EF4444" />
-                                <Text style={styles.btnRechazarText}>RECHAZAR</Text>
-                            </TouchableOpacity>
                             <TouchableOpacity
                                 style={[styles.btnAccion, styles.btnAceptar]}
                                 onPress={handleAceptarProgramacion}
                             >
-                                <Ionicons name="checkmark-circle" size={20} color="#fff" />
-                                <Text style={styles.btnAceptarText}>ACEPTAR</Text>
+                                <Ionicons name="checkmark-circle" size={22} color="#fff" />
+                                <Text style={styles.btnAceptarText}>ACEPTAR SERVICIO</Text>
                             </TouchableOpacity>
                         </View>
                     </View>
@@ -417,45 +445,23 @@ export default function ServicesScreen() {
         );
     };
 
-    // ── Render: modal motivo de rechazo ─────────────────────────────────────
-    const renderModalRechazo = () => (
-        <Modal visible={rechazoModalVisible} transparent animationType="fade" statusBarTranslucent>
-            <View style={styles.modalOverlay}>
-                <View style={styles.rechazoCard}>
-                    <Text style={styles.rechazoTitle}>Motivo del rechazo</Text>
-                    {['Fuera de zona', 'Vehículo con falla', 'Turno incompatible', 'Otro'].map(motivo => (
-                        <TouchableOpacity
-                            key={motivo}
-                            style={styles.motivoBtn}
-                            onPress={() => handleRechazarProgramacion(motivo)}
-                        >
-                            <Ionicons name="radio-button-off" size={18} color="#EF4444" />
-                            <Text style={styles.motivoText}>{motivo}</Text>
-                        </TouchableOpacity>
-                    ))}
-                    <TouchableOpacity
-                        style={styles.motivoCancelar}
-                        onPress={() => setRechazoModalVisible(false)}
-                    >
-                        <Text style={styles.motivoCancelarText}>Cancelar</Text>
-                    </TouchableOpacity>
-                </View>
-            </View>
-        </Modal>
-    );
-
     // ── Render: tarjeta de servicio clásico ────────────────────────────────
     const renderService = ({ item }: { item: Service }) => {
         const siguiente = SIGUIENTE_ESTADO[item.estado];
         const esPendiente = item.estado === 'ASIGNADO';
         const estadoActualIdx = PASOS_VIAJE.findIndex(p => p.estado === item.estado);
 
+        const statusCfg = STATUS_CONFIG[item.estado] || { bg: '#F3F4F6', text: '#374151' };
+        const accentColor = item.estado === 'ASIGNADO' ? '#F59E0B'
+            : ESTADOS_ACTIVO.includes(item.estado) ? COLORS.primary
+            : '#E5E7EB';
+
         return (
-            <View style={styles.serviceCard}>
+            <View style={[styles.serviceCard, { borderLeftColor: accentColor }]}>
                 {/* Header */}
                 <View style={styles.cardHeader}>
-                    <View style={[styles.statusBadge, { backgroundColor: ESTADO_COLOR[item.estado] || '#666' }]}>
-                        <Text style={styles.statusText}>{ESTADO_LABEL[item.estado] || item.estado}</Text>
+                    <View style={[styles.statusBadge, { backgroundColor: statusCfg.bg }]}>
+                        <Text style={[styles.statusText, { color: statusCfg.text }]}>{ESTADO_LABEL[item.estado] || item.estado}</Text>
                     </View>
                     <Text style={styles.serviceCode}>{item.codigo}</Text>
                 </View>
@@ -620,17 +626,16 @@ export default function ServicesScreen() {
                             <Ionicons name="document-outline" size={64} color="#ccc" />
                             <Text style={styles.emptyText}>
                                 {activeTab === 'pendientes' ? 'Sin servicios pendientes' :
-                                 activeTab === 'activos' ? 'Sin servicios activos' :
-                                 'Sin historial'}
+                                    activeTab === 'activos' ? 'Sin servicios activos' :
+                                        'Sin historial'}
                             </Text>
                         </View>
                     }
                 />
             )}
 
-            {/* Modales */}
+            {/* Modal nueva asignación */}
             {renderNuevaAsignacion()}
-            {renderModalRechazo()}
         </View>
     );
 }
@@ -688,9 +693,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 4,
         gap: 4,
     },
-    tabActive: { borderBottomWidth: 2, borderBottomColor: '#0066CC' },
+    tabActive: { borderBottomWidth: 2, borderBottomColor: '#00A878' },
     tabText: { fontSize: 11, color: '#9ca3af', fontWeight: '600', textAlign: 'center' },
-    tabTextActive: { color: '#0066CC' },
+    tabTextActive: { color: '#00A878' },
     badge: {
         backgroundColor: '#EF4444',
         borderRadius: 10,
@@ -707,30 +712,33 @@ const styles = StyleSheet.create({
 
     // Service card
     serviceCard: {
-        backgroundColor: '#fff',
+        backgroundColor: '#FFFFFF',
         borderRadius: 16,
         padding: 14,
         marginBottom: 12,
         shadowColor: '#000',
-        shadowOpacity: 0.07,
-        shadowRadius: 6,
+        shadowOpacity: 0.08,
+        shadowOffset: { width: 0, height: 2 },
+        shadowRadius: 8,
         elevation: 3,
+        borderLeftWidth: 4,
+        borderLeftColor: '#E5E7EB',
     },
     cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
-    statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
-    statusText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+    statusBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20 },
+    statusText: { fontSize: 11, fontWeight: '700' },
     serviceCode: { fontSize: 11, color: '#9ca3af', fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace' },
 
     patientRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, marginBottom: 12 },
     patientInfo: { flex: 1 },
-    patientName: { fontSize: 16, fontWeight: '700', color: '#1f2937' },
+    patientName: { fontSize: 17, fontWeight: '700', color: '#1A2332' },
     patientPhone: { fontSize: 13, color: '#6b7280', marginTop: 2 },
     patientObs: { fontSize: 12, color: '#F59E0B', marginTop: 2 },
 
     addressSection: { marginBottom: 10, paddingLeft: 4 },
     addressRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
     addressDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#9ca3af', marginTop: 5 },
-    destinationDot: { backgroundColor: '#0066CC' },
+    destinationDot: { backgroundColor: '#00A878' },
     addressLine: { width: 2, height: 18, backgroundColor: '#e5e7eb', marginLeft: 4, marginVertical: 2 },
     addressText: { flex: 1, fontSize: 13, color: '#4b5563', lineHeight: 18 },
 
@@ -743,9 +751,9 @@ const styles = StyleSheet.create({
     pasoRow: { alignItems: 'center', flex: 1 },
     pasoDot: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#e5e7eb', alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
     pasoDotCompletado: { backgroundColor: '#10B981' },
-    pasoDotActual: { backgroundColor: '#0066CC', borderWidth: 2, borderColor: '#93c5fd' },
+    pasoDotActual: { backgroundColor: '#00A878', borderWidth: 2, borderColor: '#6EE7B7' },
     pasoLabel: { fontSize: 9, color: '#9ca3af', textAlign: 'center' },
-    pasoLabelActual: { color: '#0066CC', fontWeight: '700' },
+    pasoLabelActual: { color: '#00A878', fontWeight: '700' },
     pasoLabelCompletado: { color: '#10B981' },
 
     // Acciones
@@ -761,9 +769,9 @@ const styles = StyleSheet.create({
     },
     rejectButton: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA' },
     rejectText: { color: '#EF4444', fontWeight: '700', fontSize: 14 },
-    acceptButton: { backgroundColor: '#10B981' },
+    acceptButton: { backgroundColor: '#00A878' },
     acceptText: { color: '#fff', fontWeight: '700', fontSize: 14 },
-    primaryButton: { backgroundColor: '#0066CC' },
+    primaryButton: { backgroundColor: '#00A878' },
     primaryText: { color: '#fff', fontWeight: '700', fontSize: 14 },
 
     // Empty state
@@ -786,7 +794,7 @@ const styles = StyleSheet.create({
         paddingBottom: 32,
     },
     asignacionHeader: {
-        backgroundColor: '#0066CC',
+        backgroundColor: '#00A878',
         paddingVertical: 14,
         paddingHorizontal: 20,
         alignItems: 'center',
@@ -809,6 +817,7 @@ const styles = StyleSheet.create({
         backgroundColor: '#FEF2F2',
         borderColor: '#FECACA',
     },
+    countdownUrgenteText: { color: '#DC2626' },
     countdownText: { fontSize: 18, fontWeight: '800', color: '#F59E0B' },
     asignacionBotones: { flexDirection: 'row', gap: 14, paddingHorizontal: 20 },
     btnAccion: {
@@ -820,31 +829,16 @@ const styles = StyleSheet.create({
         borderRadius: 14,
         gap: 8,
     },
-    btnRechazar: { backgroundColor: '#FEF2F2', borderWidth: 1.5, borderColor: '#FECACA' },
-    btnRechazarText: { color: '#EF4444', fontWeight: '800', fontSize: 15 },
-    btnAceptar: { backgroundColor: '#10B981' },
-    btnAceptarText: { color: '#fff', fontWeight: '800', fontSize: 15 },
-
-    // Rechazo modal
-    rechazoCard: {
-        backgroundColor: '#fff',
-        borderTopLeftRadius: 20,
-        borderTopRightRadius: 20,
-        padding: 24,
-        paddingBottom: 36,
+    btnAceptar: { backgroundColor: '#00A878', flex: 1 },
+    btnAceptarText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+    nagHint: {
+        textAlign: 'center',
+        fontSize: 12,
+        color: '#9CA3AF',
+        marginHorizontal: 20,
+        marginBottom: 16,
+        fontStyle: 'italic',
     },
-    rechazoTitle: { fontSize: 17, fontWeight: '700', color: '#1f2937', marginBottom: 16 },
-    motivoBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        paddingVertical: 14,
-        borderBottomWidth: 1,
-        borderBottomColor: '#f3f4f6',
-    },
-    motivoText: { fontSize: 15, color: '#374151' },
-    motivoCancelar: { marginTop: 14, alignItems: 'center', paddingVertical: 12 },
-    motivoCancelarText: { fontSize: 15, color: '#9ca3af', fontWeight: '600' },
 
     // Info rows (nueva asignación)
     infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },

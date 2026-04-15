@@ -17,34 +17,81 @@ const LOCATION_TASK_NAME = 'ZURI_BACKGROUND_LOCATION';
 
 // Clave AsyncStorage para persistir estado del turno y conductorId
 const TURNO_ACTIVO_KEY = 'zuri_turno_activo';
-const CONDUCTOR_ID_KEY  = 'zuri_conductor_id';
+const CONDUCTOR_ID_KEY = 'zuri_conductor_id';
 
 // ============================================================================
-// Offline location queue (in-memory fallback — no extra packages needed)
+// Offline GPS queue — persisted in AsyncStorage (survives app restarts)
 // ============================================================================
-const MAX_PENDING_LOCATIONS = 50;
-const pendingLocations: Array<{ conductorId: number; data: any; queuedAt: number }> = [];
+const GPS_QUEUE_KEY = 'zuri_gps_queue';
+const MAX_QUEUE_SIZE = 500;
 
-function flushPendingLocations() {
-    if (pendingLocations.length === 0) return;
-    const toSend = pendingLocations.splice(0); // drain the queue
-    toSend.forEach(({ conductorId, data }) => {
-        socket.emit('driver:location:update', { conductorId, ...data });
+interface QueuedLocation {
+    conductorId: number;
+    data: any;
+    queuedAt: number;
+}
+
+async function loadGpsQueue(): Promise<QueuedLocation[]> {
+    try {
+        const raw = await AsyncStorage.getItem(GPS_QUEUE_KEY);
+        return raw ? JSON.parse(raw) : [];
+    } catch {
+        return [];
+    }
+}
+
+async function saveGpsQueue(queue: QueuedLocation[]): Promise<void> {
+    try {
+        await AsyncStorage.setItem(GPS_QUEUE_KEY, JSON.stringify(queue));
+    } catch (e) {
+        console.error('[GPS Queue] Save error:', e);
+    }
+}
+
+async function enqueueLocation(conductorId: number, data: any): Promise<void> {
+    const queue = await loadGpsQueue();
+    queue.push({ conductorId, data, queuedAt: Date.now() });
+    // Keep only the most recent MAX_QUEUE_SIZE entries
+    const trimmed = queue.slice(-MAX_QUEUE_SIZE);
+    await saveGpsQueue(trimmed);
+}
+
+async function flushGpsQueue(): Promise<void> {
+    const queue = await loadGpsQueue();
+    if (queue.length === 0) return;
+
+    // Try emitting via WebSocket first
+    const flushed: number[] = [];
+    queue.forEach(({ conductorId, data }, idx) => {
+        if (socket.isConnected) {
+            socket.emit('driver:location:update', { conductorId, ...data });
+            flushed.push(idx);
+        }
     });
-    console.log(`📤 [Location] Flushed ${toSend.length} queued location(s) after reconnect`);
+
+    if (flushed.length > 0) {
+        await AsyncStorage.removeItem(GPS_QUEUE_KEY);
+        console.log(`📤 [GPS Queue] Flushed ${flushed.length} queued location(s) after reconnect`);
+    }
 }
 
 function sendLocationViaSocket(conductorId: number, data: any) {
     if (socket.isConnected) {
-        flushPendingLocations(); // send any buffered locations first
+        // Flush any previously queued locations first
+        flushGpsQueue().catch(() => {});
         socket.emit('driver:location:update', { conductorId, ...data });
     } else {
-        if (pendingLocations.length < MAX_PENDING_LOCATIONS) {
-            pendingLocations.push({ conductorId, data, queuedAt: Date.now() });
-        }
-        // Fall through — HTTP backup in updateLocation will persist the data
+        // Persist to AsyncStorage for offline resilience
+        enqueueLocation(conductorId, data).catch(e =>
+            console.error('[GPS Queue] Enqueue error:', e)
+        );
     }
 }
+
+// Flush queue when socket reconnects
+socket.on('connect', () => {
+    flushGpsQueue().catch(() => {});
+});
 
 // ============================================================================
 // Types
@@ -170,7 +217,7 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
                 // Detener tarea previa si estaba corriendo (evita duplicados)
                 const yaActiva = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => false);
                 if (yaActiva) {
-                    await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => {});
+                    await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => { });
                 }
 
                 await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
@@ -348,7 +395,11 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
                 console.log('[Location] Turno persistido pero tarea inactiva — reiniciando GPS');
                 return get().iniciarTurno();
             }
-            return false;
+
+            // ZURI-FIX 2026-04-10: En web también rearrancar tracking si turno estaba activo
+            // Esto permite que al recargar la PWA el socket vuelva a conectarse
+            console.log('[Location] Turno persistido en web — reiniciando tracking');
+            return get().iniciarTurno();
         } catch (err) {
             console.error('[Location] verificarTurnoPeristido error:', err);
             return false;
@@ -414,9 +465,27 @@ if (Platform.OS !== 'web') {
 
             if (!response.ok) {
                 console.error('[GPS BG] HTTP update failed:', response.status);
+                // Queue for later flush
+                await enqueueLocation(conductorId, {
+                    latitude: loc.coords.latitude,
+                    longitude: loc.coords.longitude,
+                    heading: loc.coords.heading,
+                    speed: velocidadKmh,
+                    accuracy: loc.coords.accuracy,
+                });
             }
         } catch (err) {
             console.error('[GPS BG] Error enviando ubicación:', err);
+            // Queue for later flush when connectivity is restored
+            if (conductorId) {
+                await enqueueLocation(conductorId, {
+                    latitude: loc.coords.latitude,
+                    longitude: loc.coords.longitude,
+                    heading: loc.coords.heading,
+                    speed: velocidadKmh,
+                    accuracy: loc.coords.accuracy,
+                }).catch(() => {});
+            }
         }
     });
 }
