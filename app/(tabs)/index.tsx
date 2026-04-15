@@ -123,18 +123,43 @@ export default function HomeScreen() {
         verificarTurnoPeristido().then(reanudado => {
             if (reanudado) {
                 console.log('[Home] Turno reanudado automáticamente');
-                // Reconectar socket en background
-                socket.connect().then(connected => {
-                    if (connected) useLocationStore.getState().setConnected(true);
-                });
             }
         });
 
+        // ZURI-FIX 2026-04-10: Auto-connect socket on mount if conductor is authenticated
+        // Previously socket only connected when user pressed the power button,
+        // so service:assigned listeners were never active on page load/reload.
+        if (conductor?.id) {
+            socket.setDriverId(conductor.id);
+            socket.connect().then(connected => {
+                if (connected) {
+                    console.log('[Home] Socket auto-connected on mount');
+                    useLocationStore.getState().setConnected(true);
+                }
+            });
+        }
+
         loadActiveService();
 
-        socket.on('service:assigned', () => loadActiveService());
-        return () => { socket.off('service:assigned'); };
-    }, []);
+        // Assignment modal is handled exclusively by the services tab (useServicioSocket).
+        // Home screen only refreshes counters when a new assignment arrives.
+        const handleServiceAssigned = (data: any) => {
+            console.log('[Home] service:assigned received — tipo:', data?.tipo, '— reloading counters');
+            loadActiveService();
+        };
+
+        socket.on('service:assigned', handleServiceAssigned);
+
+        // Connection state sync
+        const unsubConnection = socket.onConnectionChange((connected) => {
+            useLocationStore.getState().setConnected(connected);
+        });
+
+        return () => {
+            socket.off('service:assigned', handleServiceAssigned);
+            unsubConnection();
+        };
+    }, [conductor?.id]);
 
     const statusColor = isOnline ? '#10B981' : '#9CA3AF';
     const statusBg = isOnline ? '#D1FAE5' : '#F3F4F6';
@@ -277,6 +302,7 @@ export default function HomeScreen() {
                         .filter(Boolean).join(' ') || ''}
                 </Text>
             </View>
+
         </ScrollView>
     );
 }
