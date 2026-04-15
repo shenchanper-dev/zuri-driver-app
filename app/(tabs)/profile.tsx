@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/auth';
 import { useLocationStore } from '@/stores/location';
+import { socket } from '@/services/socket';
 
 export default function ProfileScreen() {
     const router = useRouter();
@@ -31,8 +32,23 @@ export default function ProfileScreen() {
                     text: 'Cerrar Sesión',
                     style: 'destructive',
                     onPress: async () => {
-                        await stopTracking();
-                        await logout();
+                        try {
+                            // 1. Disconnect WebSocket
+                            socket.disconnect();
+                            // 2. Stop GPS tracking
+                            await stopTracking();
+                            // 3. Clear auth store + token
+                            await logout();
+                            // 4. Clear web storage (PWA)
+                            if (typeof window !== 'undefined') {
+                                localStorage.clear();
+                                sessionStorage.clear();
+                            }
+                        } catch (e) {
+                            console.error('[Logout] Error:', e);
+                        }
+                        // 5. Always redirect to login
+                        router.replace('/login');
                     },
                 },
             ]

@@ -37,6 +37,7 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
         "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
         "WAKE_LOCK",
         "RECEIVE_BOOT_COMPLETED",
         "USE_BIOMETRIC",
@@ -61,9 +62,11 @@
         {
           "locationAlwaysAndWhenInUsePermission": "Permitir que ZURI acceda a tu ubicación para tracking de servicios",
           "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true,
           "isIosBackgroundLocationEnabled": true
         }
       ],
+      "expo-task-manager",
       [
         "expo-local-authentication",
         {

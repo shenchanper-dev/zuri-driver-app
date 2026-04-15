@@ -482,17 +482,9 @@ if (Platform.OS !== 'web') {
                 });
             }
         } catch (err) {
+            // Unexpected error (e.g. AsyncStorage failure) — log only.
+            // Normal HTTP failures are already queued inside the try block above.
             console.error('[GPS BG] Error enviando ubicación:', err);
-            // Queue for later flush when connectivity is restored
-            if (conductorId) {
-                await enqueueLocation(conductorId, {
-                    latitude: loc.coords.latitude,
-                    longitude: loc.coords.longitude,
-                    heading: loc.coords.heading,
-                    speed: velocidadKmh,
-                    accuracy: loc.coords.accuracy,
-                }).catch(() => {});
-            }
         }
     });
 }

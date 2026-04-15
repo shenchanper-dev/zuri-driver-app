@@ -17,6 +17,8 @@ class SocketService {
     private reconnectAttempts = 0;
     private maxReconnectAttempts = 10;
     private currentConductorId: number | null = null;
+    private pendingListeners: Array<{ event: string; callback: (data: any) => void }> = [];
+    private connectionChangeCallbacks: Array<(connected: boolean) => void> = [];
 
     /**
      * Connect to WebSocket server
@@ -73,6 +75,19 @@ class SocketService {
                     console.log('✅ [SocketService] Connected successfully (ID:', this.socket?.id, ')');
                     this.reconnectAttempts = 0;
                     clearTimeout(timeoutId);
+
+                    // Replay any listeners that were buffered before connect
+                    if (this.pendingListeners.length > 0) {
+                        console.log(`🔌 [SocketService] Replaying ${this.pendingListeners.length} buffered listener(s)`);
+                        for (const { event, callback } of this.pendingListeners) {
+                            this.socket!.on(event, callback);
+                        }
+                        this.pendingListeners = [];
+                    }
+
+                    // Notify connection change callbacks
+                    this.connectionChangeCallbacks.forEach(cb => cb(true));
+
                     resolve(true);
                 });
 
@@ -109,6 +124,8 @@ class SocketService {
 
         this.socket.on('disconnect', (reason) => {
             console.log('🔌 Socket disconnected:', reason);
+            // Notify connection change callbacks
+            this.connectionChangeCallbacks.forEach(cb => cb(false));
         });
 
         this.socket.on('reconnect', (attemptNumber) => {
@@ -118,17 +135,17 @@ class SocketService {
                 this.socket?.emit('driver:register', { conductorId: this.currentConductorId });
                 console.log('🔌 Re-registered driver:', this.currentConductorId);
             }
+            // Notify connection change callbacks
+            this.connectionChangeCallbacks.forEach(cb => cb(true));
         });
 
         this.socket.on('error', (error) => {
             console.error('Socket error:', error);
         });
 
-        // Service assignment notification
-        this.socket.on('service:assigned', (data) => {
-            console.log('📋 New service assigned:', data);
-            // This will trigger a notification/alert in the app
-        });
+        // NOTE: service:assigned is NOT handled here.
+        // Components register their own listeners via socket.on() which
+        // are buffered in pendingListeners until the socket connects.
 
         // Location acknowledgment
         this.socket.on('driver:location:ack', (_data) => {
@@ -163,21 +180,43 @@ class SocketService {
     }
 
     /**
-     * Listen to event
+     * Listen to event (buffers if socket not yet connected)
      */
     on(event: string, callback: (data: any) => void) {
         if (this.socket) {
             this.socket.on(event, callback);
+        } else {
+            // Buffer the listener — it will be replayed once connect() succeeds
+            console.log(`🔌 [SocketService] Buffering listener for "${event}" (socket not connected yet)`);
+            this.pendingListeners.push({ event, callback });
         }
     }
 
     /**
-     * Remove event listener
+     * Remove event listener (also cleans from pending buffer)
      */
     off(event: string, callback?: (data: any) => void) {
         if (this.socket) {
             this.socket.off(event, callback);
         }
+        // Also remove from pending buffer
+        if (callback) {
+            this.pendingListeners = this.pendingListeners.filter(
+                p => !(p.event === event && p.callback === callback)
+            );
+        } else {
+            this.pendingListeners = this.pendingListeners.filter(p => p.event !== event);
+        }
+    }
+
+    /**
+     * Register a callback for connection state changes
+     */
+    onConnectionChange(callback: (connected: boolean) => void): () => void {
+        this.connectionChangeCallbacks.push(callback);
+        return () => {
+            this.connectionChangeCallbacks = this.connectionChangeCallbacks.filter(cb => cb !== callback);
+        };
     }
 
     /**
