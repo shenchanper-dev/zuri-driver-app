@@ -1,8 +1,8 @@
 /**
- * ZURI Driver App - Home Screen (FIXED)
- * - Botón verde apenas GPS arrerca (no espera socket)
- * - Stats "Hoy" dinámicas desde API
- * - isOnline persiste mientras la sesión esté viva
+ * ZURI Driver App - Home Screen
+ * - Botón verde apenas GPS arranca (no espera socket)
+ * - Al conectarse verifica servicios pendientes en BD
+ * - Tarjeta dinámica según estado real de servicios
  */
 
 import { useEffect, useState, useCallback } from 'react';
@@ -15,6 +15,7 @@ import {
     RefreshControl,
     Alert,
     ActivityIndicator,
+    Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -28,24 +29,69 @@ export default function HomeScreen() {
     const { conductor } = useAuthStore();
     const { isTracking, iniciarTurno, finalizarTurno, verificarTurnoPeristido, isConnected } = useLocationStore();
 
-    // El estado online visual ahora depende de si el GPS está trackeando 
-    // Y opcionalmente si el socket está conectado (decisión de UX)
-    // Para esta refactorización, lo haremos depender de isTracking pero con indicador de Socket
     const isOnline = isTracking;
     const [isToggling, setIsToggling] = useState(false);
-    const [currentService, setCurrentService] = useState<any>(null);
     const [refreshing, setRefreshing] = useState(false);
-    const [todayStats, setTodayStats] = useState({ viajes: 0, km: 0 });
-    const [pendingCount, setPendingCount] = useState(0);
+    const [todayStats] = useState({ viajes: 0, km: 0 });
 
-    // ── Conectar: GPS primero → UI verde → socket en background ──
+    // Counters for dynamic home card
+    const [serviciosResumen, setServiciosResumen] = useState({ pendientes: 0, activos: 0 });
+
+    // ── Load service counters ─────────────────────────────────────────────────
+    const refrescarResumen = useCallback(async () => {
+        try {
+            const res = await driverApi.getServices();
+            const todos: any[] = res.servicios ?? [];
+            console.log('[Home] Servicios en BD:', todos.length);
+            setServiciosResumen({
+                pendientes: todos.filter((s: any) => s.estado === 'ASIGNADO').length,
+                activos: todos.filter((s: any) =>
+                    ['ACEPTADO', 'EN_CAMINO', 'EN_ORIGEN', 'EN_TRANSPORTE', 'EN_DESTINO'].includes(s.estado)
+                ).length,
+            });
+        } catch {
+            // Silently ignore — home is informational only
+        }
+    }, []);
+
+    // ── Check for pending services assigned while offline ─────────────────────
+    const checkServiciosPendientes = useCallback(async () => {
+        try {
+            const res = await driverApi.getServices();
+            const todos: any[] = res.servicios ?? [];
+            console.log('[ZURI] Servicios al conectar:', todos.length);
+
+            const pendientes = todos.filter((s: any) => s.estado === 'ASIGNADO');
+            if (pendientes.length > 0) {
+                Alert.alert(
+                    '🔔 Tienes servicios pendientes',
+                    `Se te asignaron ${pendientes.length} servicio${pendientes.length > 1 ? 's' : ''} mientras estabas desconectado.\n\nRevisa la sección "Servicios" para aceptarlos.`,
+                    [
+                        { text: 'Ver ahora', onPress: () => router.push('/(tabs)/services') },
+                        { text: 'Más tarde', style: 'cancel' },
+                    ]
+                );
+            }
+
+            // Update counters from same response
+            setServiciosResumen({
+                pendientes: pendientes.length,
+                activos: todos.filter((s: any) =>
+                    ['ACEPTADO', 'EN_CAMINO', 'EN_ORIGEN', 'EN_TRANSPORTE', 'EN_DESTINO'].includes(s.estado)
+                ).length,
+            });
+        } catch (e) {
+            console.error('[ZURI] Error verificando pendientes al conectar:', e);
+        }
+    }, [router]);
+
+    // ── Toggle online/offline ─────────────────────────────────────────────────
     const handleToggleStatus = async () => {
         if (isToggling) return;
         setIsToggling(true);
 
         try {
             if (!isOnline) {
-                // 1. Pedir permisos + arrancar GPS (persiste conductorId y turno activo)
                 const gpsOk = await iniciarTurno();
                 if (!gpsOk) {
                     Alert.alert(
@@ -56,26 +102,22 @@ export default function HomeScreen() {
                     return;
                 }
 
-                // 2. Actualizar estado en el servidor (HTTP fallback)
                 try {
                     await driverApi.updateProfile({ estadoServicio: 'DISPONIBLE' });
                 } catch (e) {
                     console.warn('[Home] No se pudo actualizar estadoServicio:', e);
                 }
 
-                // ZURI-FIX 2026-03-30: liberar el botón inmediatamente tras GPS exitoso, sin esperar al socket
+                // Release button immediately — don't wait for socket
                 setIsToggling(false);
 
-                // 3. Socket en background (sin await — no bloquea el UI)
-                socket.connect().then(connected => { // ZURI-FIX 2026-03-30: fire-and-forget, era await (bloqueaba 15s)
-                    if (connected) {
-                        useLocationStore.getState().setConnected(true);
-                    }
-                    // Sin Alert: si falla el socket el modo HTTP fallback opera silenciosamente
+                // Socket in background + check pending services
+                socket.connect().then(connected => {
+                    if (connected) useLocationStore.getState().setConnected(true);
                 });
+                checkServiciosPendientes();
 
             } else {
-                // DESCONECTAR
                 await finalizarTurno();
                 useLocationStore.getState().setConnected(false);
                 socket.disconnect();
@@ -91,44 +133,18 @@ export default function HomeScreen() {
         }
     };
 
-    // ── Servicio activo ──
-    const loadActiveService = useCallback(async () => {
-        try {
-            // Cargar activo
-            const activeRes = await driverApi.getServices({ estado: 'activo' });
-            if (activeRes.success && activeRes.servicios?.length > 0) {
-                setCurrentService(activeRes.servicios[0]);
-            } else {
-                setCurrentService(null);
-            }
-
-            // Cargar pendientes (para el badge/alerta)
-            const pendingRes = await driverApi.getServices({ estado: 'pendiente' });
-            if (pendingRes.success) {
-                setPendingCount(pendingRes.servicios?.length || 0);
-            }
-        } catch (e) {
-            console.warn('[Home] No se pudo cargar el servicio activo');
-        }
-    }, []);
-
     const onRefresh = async () => {
         setRefreshing(true);
-        await loadActiveService();
+        await refrescarResumen();
         setRefreshing(false);
     };
 
+    // ── Mount: auto-resume turno, connect socket, load counters ──────────────
     useEffect(() => {
-        // Auto-reanudación: si había turno activo antes de cerrar la app, reanudarlo
         verificarTurnoPeristido().then(reanudado => {
-            if (reanudado) {
-                console.log('[Home] Turno reanudado automáticamente');
-            }
+            if (reanudado) console.log('[Home] Turno reanudado automáticamente');
         });
 
-        // ZURI-FIX 2026-04-10: Auto-connect socket on mount if conductor is authenticated
-        // Previously socket only connected when user pressed the power button,
-        // so service:assigned listeners were never active on page load/reload.
         if (conductor?.id) {
             socket.setDriverId(conductor.id);
             socket.connect().then(connected => {
@@ -139,36 +155,36 @@ export default function HomeScreen() {
             });
         }
 
-        loadActiveService();
+        refrescarResumen();
 
-        // Assignment modal is handled exclusively by the services tab (useServicioSocket).
-        // Home screen only refreshes counters when a new assignment arrives.
+        // On new assignment arrival, refresh counters only (modal handled by services tab)
         const handleServiceAssigned = (data: any) => {
             console.log('[Home] service:assigned received — tipo:', data?.tipo, '— reloading counters');
-            loadActiveService();
+            refrescarResumen();
         };
 
         socket.on('service:assigned', handleServiceAssigned);
+        socket.on('service:updated', refrescarResumen);
 
-        // Connection state sync
         const unsubConnection = socket.onConnectionChange((connected) => {
             useLocationStore.getState().setConnected(connected);
         });
 
         return () => {
             socket.off('service:assigned', handleServiceAssigned);
+            socket.off('service:updated', refrescarResumen);
             unsubConnection();
         };
     }, [conductor?.id]);
 
     const statusColor = isOnline ? '#10B981' : '#9CA3AF';
-    const statusBg = isOnline ? '#D1FAE5' : '#F3F4F6';
-    const iconName = isOnline ? 'power' : 'power-outline';
+    const iconName: 'power' | 'power-outline' = isOnline ? 'power' : 'power-outline';
 
     return (
         <ScrollView
             style={styles.container}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+            contentContainerStyle={styles.content}
+            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00875A" />}
         >
             {/* ── Status Card ── */}
             <View style={styles.statusCard}>
@@ -193,7 +209,7 @@ export default function HomeScreen() {
                     </TouchableOpacity>
                 </View>
 
-                {/* Indicadores GPS + Servidor */}
+                {/* GPS + Server indicators */}
                 <View style={styles.indicators}>
                     <View style={styles.indicator}>
                         <View style={[styles.indicatorDot, isTracking && styles.indicatorActive]} />
@@ -209,59 +225,62 @@ export default function HomeScreen() {
                 </View>
             </View>
 
-            {/* ── Alerta: Nuevas Asignaciones ── */}
-            {!currentService && pendingCount > 0 && (
-                <TouchableOpacity
-                    style={styles.pendingAlert}
-                    onPress={() => router.push('/(tabs)/services')}
-                >
-                    <View style={styles.pendingBadge}>
-                        <Ionicons name="notifications" size={20} color="#fff" />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                        <Text style={styles.pendingTitle}>Tienes {pendingCount} asignación{pendingCount > 1 ? 'es' : ''} nueva{pendingCount > 1 ? 's' : ''}</Text>
-                        <Text style={styles.pendingSubtext}>Toca para ver y aceptar</Text>
-                    </View>
-                    <Ionicons name="chevron-forward" size={20} color="#F59E0B" />
-                </TouchableOpacity>
-            )}
-
-            {/* ── Servicio activo / Esperando ── */}
-            {currentService ? (
-                <TouchableOpacity
-                    style={styles.serviceCard}
-                    onPress={() => router.push('/(tabs)/services')}
-                >
-                    <View style={styles.serviceHeader}>
-                        <Ionicons name="navigate" size={24} color="#0066CC" />
-                        <Text style={styles.serviceTitle}>Servicio Activo</Text>
-                        <View style={styles.serviceBadge}>
-                            <Text style={styles.serviceBadgeText}>{currentService.estado}</Text>
+            {/* ── Dynamic service state card ── */}
+            {isOnline && (
+                serviciosResumen.activos > 0 ? (
+                    <TouchableOpacity
+                        style={styles.estadoServicioCard}
+                        onPress={() => router.push('/(tabs)/services')}
+                        activeOpacity={0.8}
+                    >
+                        <View style={styles.estadoIcono}>
+                            <Text style={{ fontSize: 28 }}>🚗</Text>
                         </View>
-                    </View>
-                    <Text style={styles.patientName}>{currentService.paciente?.nombre}</Text>
-                    <View style={styles.addressRow}>
-                        <Ionicons name="location" size={16} color="#666" />
-                        <Text style={styles.addressText} numberOfLines={1}>
-                            {currentService.origen?.direccion}
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.estadoTitulo}>Servicio en curso</Text>
+                            <Text style={styles.estadoSubtitulo}>Toca para ver detalles y avanzar estado</Text>
+                        </View>
+                        <View style={styles.estadoBadge}>
+                            <Text style={styles.estadoBadgeText}>{serviciosResumen.activos}</Text>
+                        </View>
+                    </TouchableOpacity>
+                ) : serviciosResumen.pendientes > 0 ? (
+                    <TouchableOpacity
+                        style={[styles.estadoServicioCard, { borderLeftColor: '#F59E0B' }]}
+                        onPress={() => router.push('/(tabs)/services')}
+                        activeOpacity={0.8}
+                    >
+                        <View style={[styles.estadoIcono, { backgroundColor: '#FFFBEB' }]}>
+                            <Text style={{ fontSize: 28 }}>🔔</Text>
+                        </View>
+                        <View style={{ flex: 1 }}>
+                            <Text style={styles.estadoTitulo}>Tienes servicios asignados</Text>
+                            <Text style={styles.estadoSubtitulo}>
+                                {serviciosResumen.pendientes} servicio{serviciosResumen.pendientes > 1 ? 's' : ''} esperando tu respuesta
+                            </Text>
+                        </View>
+                        <View style={[styles.estadoBadge, { backgroundColor: '#FEF3C7' }]}>
+                            <Text style={[styles.estadoBadgeText, { color: '#92400E' }]}>
+                                {serviciosResumen.pendientes}
+                            </Text>
+                        </View>
+                    </TouchableOpacity>
+                ) : (
+                    <View style={styles.esperandoCard}>
+                        <Text style={{ fontSize: 40, marginBottom: 12 }}>⏳</Text>
+                        <Text style={styles.esperandoTitulo}>Sin servicios asignados</Text>
+                        <Text style={styles.esperandoSubtitulo}>
+                            Te notificaremos cuando tengas un nuevo servicio
                         </Text>
+                        <TouchableOpacity
+                            style={styles.btnVerHistorial}
+                            onPress={() => router.push('/(tabs)/services')}
+                        >
+                            <Text style={styles.btnVerHistorialText}>Ver historial</Text>
+                        </TouchableOpacity>
                     </View>
-                    <View style={styles.addressRow}>
-                        <Ionicons name="flag" size={16} color="#0066CC" />
-                        <Text style={styles.addressText} numberOfLines={1}>
-                            {currentService.destino?.direccion}
-                        </Text>
-                    </View>
-                </TouchableOpacity>
-            ) : isOnline ? (
-                <View style={styles.waitingCard}>
-                    <Ionicons name="hourglass-outline" size={48} color="#888" />
-                    <Text style={styles.waitingText}>Esperando asignación...</Text>
-                    <Text style={styles.waitingSubtext}>
-                        Te notificaremos cuando tengas un servicio
-                    </Text>
-                </View>
-            ) : null}
+                )
+            )}
 
             {/* ── Stats Hoy ── */}
             <View style={styles.statsContainer}>
@@ -302,23 +321,24 @@ export default function HomeScreen() {
                         .filter(Boolean).join(' ') || ''}
                 </Text>
             </View>
-
         </ScrollView>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#f5f5f5' },
+    container: { flex: 1, backgroundColor: '#F0F4F8' },
+    content: { paddingBottom: 32, paddingTop: Platform.OS === 'ios' ? 0 : 8 },
     statusCard: {
         backgroundColor: '#fff',
         margin: 16,
+        marginBottom: 12,
         borderRadius: 16,
         padding: 20,
         elevation: 3,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
     },
     statusHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
     statusLabel: { fontSize: 14, color: '#6B7280' },
@@ -335,65 +355,103 @@ const styles = StyleSheet.create({
     indicatorActive: { backgroundColor: '#10B981' },
     indicatorText: { fontSize: 13, color: '#6B7280' },
     httpFallback: { fontSize: 11, color: '#F59E0B', alignSelf: 'center' },
-    serviceCard: {
-        backgroundColor: '#fff',
-        marginHorizontal: 16, marginBottom: 16,
-        borderRadius: 16, padding: 20,
-        borderLeftWidth: 4, borderLeftColor: '#0066CC',
+    // Dynamic state card
+    estadoServicioCard: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        padding: 20,
+        marginHorizontal: 16,
+        marginBottom: 12,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16,
+        borderLeftWidth: 4,
+        borderLeftColor: '#00875A',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.07,
+        shadowRadius: 8,
+        elevation: 3,
+    },
+    estadoIcono: {
+        width: 56, height: 56,
+        backgroundColor: '#F0FDF4',
+        borderRadius: 28,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    estadoTitulo: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: '#0B1F3A',
+        marginBottom: 2,
+    },
+    estadoSubtitulo: {
+        fontSize: 13,
+        color: '#6B7280',
+        lineHeight: 18,
+    },
+    estadoBadge: {
+        backgroundColor: '#D1FAE5',
+        width: 36, height: 36,
+        borderRadius: 18,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    estadoBadgeText: {
+        fontSize: 16,
+        fontWeight: '800',
+        color: '#065F46',
+    },
+    esperandoCard: {
+        backgroundColor: '#FFFFFF',
+        borderRadius: 16,
+        padding: 32,
+        marginHorizontal: 16,
+        marginBottom: 12,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 1 },
+        shadowOpacity: 0.05,
+        shadowRadius: 4,
         elevation: 2,
     },
-    serviceHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-    serviceTitle: { flex: 1, fontSize: 14, color: '#6B7280' },
-    serviceBadge: { backgroundColor: '#0066CC', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4 },
-    serviceBadgeText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-    patientName: { fontSize: 18, fontWeight: '600', color: '#1F2937', marginBottom: 12 },
-    addressRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-    addressText: { flex: 1, fontSize: 14, color: '#6B7280' },
-    waitingCard: {
-        backgroundColor: '#fff',
-        marginHorizontal: 16, marginBottom: 16,
-        borderRadius: 16, padding: 32, alignItems: 'center',
+    esperandoTitulo: {
+        fontSize: 17,
+        fontWeight: '700',
+        color: '#0B1F3A',
+        marginBottom: 8,
+        textAlign: 'center',
     },
-    waitingText: { fontSize: 18, fontWeight: '600', color: '#374151', marginTop: 16 },
-    waitingSubtext: { fontSize: 14, color: '#9CA3AF', marginTop: 8, textAlign: 'center' },
-    statsContainer: { marginHorizontal: 16, marginBottom: 16 },
+    esperandoSubtitulo: {
+        fontSize: 14,
+        color: '#6B7280',
+        textAlign: 'center',
+        lineHeight: 20,
+        marginBottom: 20,
+    },
+    btnVerHistorial: {
+        backgroundColor: '#F0F4F8',
+        paddingHorizontal: 24,
+        paddingVertical: 10,
+        borderRadius: 20,
+    },
+    btnVerHistorialText: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#0B1F3A',
+    },
+    // Stats
+    statsContainer: { marginHorizontal: 16, marginBottom: 12 },
     sectionTitle: { fontSize: 18, fontWeight: '600', color: '#1F2937', marginBottom: 12 },
     statsGrid: { flexDirection: 'row', gap: 12 },
-    statCard: { flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 16, alignItems: 'center' },
+    statCard: { flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 16, alignItems: 'center', elevation: 1 },
     statValue: { fontSize: 22, fontWeight: 'bold', color: '#1F2937', marginTop: 8 },
     statLabel: { fontSize: 12, color: '#6B7280', marginTop: 4 },
-    vehicleCard: { backgroundColor: '#fff', margin: 16, marginTop: 0, borderRadius: 16, padding: 20 },
+    // Vehicle
+    vehicleCard: { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 12, borderRadius: 16, padding: 20 },
     vehicleHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
     vehicleTitle: { fontSize: 16, fontWeight: '600', color: '#1F2937' },
     vehiclePlate: { fontSize: 28, fontWeight: 'bold', color: '#0066CC', letterSpacing: 2 },
     vehicleDetail: { fontSize: 14, color: '#6B7280', marginTop: 4 },
-    pendingAlert: {
-        backgroundColor: '#FFFBEB',
-        marginHorizontal: 16,
-        marginBottom: 16,
-        padding: 16,
-        borderRadius: 16,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        borderWidth: 1,
-        borderColor: '#FEF3C7',
-    },
-    pendingBadge: {
-        backgroundColor: '#F59E0B',
-        width: 36,
-        height: 36,
-        borderRadius: 18,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    pendingTitle: {
-        fontSize: 16,
-        fontWeight: 'bold',
-        color: '#92400E',
-    },
-    pendingSubtext: {
-        fontSize: 13,
-        color: '#B45309',
-    },
 });

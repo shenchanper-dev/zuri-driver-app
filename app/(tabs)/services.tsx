@@ -88,7 +88,7 @@ export default function ServicesScreen() {
     });
 
     // ── Handlers ──────────────────────────────────────────────────────────────
-    const handleAceptado = useCallback((asignacion: AsignacionProgramacion) => {
+    const handleAceptado = useCallback((_asignacion: AsignacionProgramacion) => {
         // Clear pending assignment — stops nagging
         nagAsignacionRef.current = null;
         setNuevaAsignacion(null);
@@ -120,20 +120,44 @@ export default function ServicesScreen() {
         return <ServicioHistorialCard servicio={item} />;
     }, [activeTab, loadServices]);
 
-    const renderEmpty = () => (
-        <View style={s.empty}>
-            <Text style={s.emptyIcon}>
-                {activeTab === 'pendientes' ? '🔔' : activeTab === 'activos' ? '🚗' : '📋'}
-            </Text>
-            <Text style={s.emptyTx}>
-                {activeTab === 'pendientes'
-                    ? 'Sin servicios pendientes'
-                    : activeTab === 'activos'
-                        ? 'No tienes servicios activos'
-                        : 'Sin historial'}
-            </Text>
-        </View>
-    );
+    const renderEmpty = () => {
+        const config = {
+            pendientes: {
+                icon: '📋',
+                titulo: 'Sin servicios pendientes',
+                subtitulo: 'Los nuevos servicios asignados aparecerán aquí',
+                boton: null,
+            },
+            activos: {
+                icon: '🚗',
+                titulo: 'Sin servicios activos',
+                subtitulo: 'Acepta un servicio pendiente para comenzar',
+                boton: { label: 'Ver pendientes', tab: 'pendientes' as TabType },
+            },
+            historial: {
+                icon: '📅',
+                titulo: 'Sin historial aún',
+                subtitulo: 'Los servicios completados aparecerán aquí',
+                boton: null,
+            },
+        }[activeTab];
+
+        return (
+            <View style={s.empty}>
+                <Text style={s.emptyIcon}>{config.icon}</Text>
+                <Text style={s.emptyTitulo}>{config.titulo}</Text>
+                <Text style={s.emptySubtitulo}>{config.subtitulo}</Text>
+                {config.boton && (
+                    <TouchableOpacity
+                        style={s.emptyBoton}
+                        onPress={() => setActiveTab(config.boton!.tab)}
+                    >
+                        <Text style={s.emptyBotonTx}>{config.boton.label}</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+        );
+    };
 
     return (
         <View style={s.container}>
@@ -281,9 +305,29 @@ const s = StyleSheet.create({
     emptyIcon: {
         fontSize: 48,
     },
-    emptyTx: {
-        fontSize: 15,
+    emptyTitulo: {
+        fontSize: 17,
+        fontWeight: '700',
+        color: C.azulTexto,
+        textAlign: 'center',
+    },
+    emptySubtitulo: {
+        fontSize: 14,
         color: C.grisTexto,
-        fontWeight: '500',
+        textAlign: 'center',
+        lineHeight: 20,
+        paddingHorizontal: 24,
+    },
+    emptyBoton: {
+        marginTop: 4,
+        backgroundColor: C.fondo,
+        paddingHorizontal: 24,
+        paddingVertical: 10,
+        borderRadius: 20,
+    },
+    emptyBotonTx: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: C.azulTexto,
     },
 });

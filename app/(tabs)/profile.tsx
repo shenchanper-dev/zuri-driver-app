@@ -48,7 +48,7 @@ export default function ProfileScreen() {
                             console.error('[Logout] Error:', e);
                         }
                         // 5. Always redirect to login
-                        router.replace('/login');
+                        router.replace('/(auth)/login');
                     },
                 },
             ]
