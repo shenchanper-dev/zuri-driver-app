@@ -24,6 +24,8 @@ const CONDUCTOR_ID_KEY = 'zuri_conductor_id';
 // ============================================================================
 const GPS_QUEUE_KEY = 'zuri_gps_queue';
 const MAX_QUEUE_SIZE = 500;
+// Dirty flag: true when the queue has items — avoids reading AsyncStorage on every connected GPS update
+let gpsQueueDirty = false;
 
 interface QueuedLocation {
     conductorId: number;
@@ -51,47 +53,52 @@ async function saveGpsQueue(queue: QueuedLocation[]): Promise<void> {
 async function enqueueLocation(conductorId: number, data: any): Promise<void> {
     const queue = await loadGpsQueue();
     queue.push({ conductorId, data, queuedAt: Date.now() });
-    // Keep only the most recent MAX_QUEUE_SIZE entries
-    const trimmed = queue.slice(-MAX_QUEUE_SIZE);
-    await saveGpsQueue(trimmed);
+    await saveGpsQueue(queue.slice(-MAX_QUEUE_SIZE));
+    gpsQueueDirty = true;
 }
 
 async function flushGpsQueue(): Promise<void> {
     const queue = await loadGpsQueue();
-    if (queue.length === 0) return;
+    if (queue.length === 0) { gpsQueueDirty = false; return; }
 
-    // Try emitting via WebSocket first
-    const flushed: number[] = [];
+    const sentIndices = new Set<number>();
     queue.forEach(({ conductorId, data }, idx) => {
         if (socket.isConnected) {
             socket.emit('driver:location:update', { conductorId, ...data });
-            flushed.push(idx);
+            sentIndices.add(idx);
         }
     });
 
-    if (flushed.length > 0) {
+    if (sentIndices.size === 0) return;
+
+    // Persist only items that weren't sent (socket may have dropped mid-flush)
+    const remaining = queue.filter((_, idx) => !sentIndices.has(idx));
+    if (remaining.length > 0) {
+        await saveGpsQueue(remaining);
+    } else {
         await AsyncStorage.removeItem(GPS_QUEUE_KEY);
-        console.log(`📤 [GPS Queue] Flushed ${flushed.length} queued location(s) after reconnect`);
+        gpsQueueDirty = false;
     }
+    console.log(`📤 [GPS Queue] Flushed ${sentIndices.size} location(s), ${remaining.length} remain`);
 }
 
 function sendLocationViaSocket(conductorId: number, data: any) {
     if (socket.isConnected) {
-        // Flush any previously queued locations first
-        flushGpsQueue().catch(() => {});
+        if (gpsQueueDirty) flushGpsQueue().catch(() => {});
         socket.emit('driver:location:update', { conductorId, ...data });
     } else {
-        // Persist to AsyncStorage for offline resilience
         enqueueLocation(conductorId, data).catch(e =>
             console.error('[GPS Queue] Enqueue error:', e)
         );
     }
 }
 
-// Flush queue when socket reconnects
-socket.on('connect', () => {
-    flushGpsQueue().catch(() => {});
-});
+// Single registration guard — prevents duplicate listeners on hot reload
+let _flushListenerRegistered = false;
+if (!_flushListenerRegistered) {
+    socket.on('connect', () => { flushGpsQueue().catch(() => {}); });
+    _flushListenerRegistered = true;
+}
 
 // ============================================================================
 // Types

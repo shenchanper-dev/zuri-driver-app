@@ -1,15 +1,10 @@
 /**
  * ZURI Driver App - Abstract GPS Hook
  * Works on both Expo native (real GPS via expo-location) and web (navigator.geolocation).
- * FIX 3: Platform-agnostic location abstraction
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { Platform } from 'react-native';
-
-// ============================================================================
-// Types
-// ============================================================================
 
 export interface DriverLocationData {
     latitude: number;
@@ -28,22 +23,32 @@ export interface UseDriverLocationReturn {
     stopTracking: () => void;
 }
 
-// ============================================================================
-// Hook
-// ============================================================================
-
 export function useDriverLocation(): UseDriverLocationReturn {
     const [location, setLocation] = useState<DriverLocationData | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isTracking, setIsTracking] = useState(false);
-    // watchRef holds the native subscription or web watchId
+    // Use a ref for the "already tracking" guard so callbacks have stable references
     const watchRef = useRef<any>(null);
 
-    const startTracking = useCallback(async () => {
-        if (isTracking) return;
+    const stopTracking = useCallback(() => {
+        if (watchRef.current == null) return;
 
         if (Platform.OS === 'web') {
-            // ── Web: navigator.geolocation ──────────────────────────────────
+            if (typeof navigator !== 'undefined' && navigator.geolocation) {
+                navigator.geolocation.clearWatch(watchRef.current);
+            }
+        } else {
+            watchRef.current?.remove?.();
+        }
+
+        watchRef.current = null;
+        setIsTracking(false);
+    }, []); // stable — uses ref, not state
+
+    const startTracking = useCallback(async () => {
+        if (watchRef.current != null) return; // already tracking
+
+        if (Platform.OS === 'web') {
             if (typeof navigator === 'undefined' || !navigator.geolocation) {
                 setError('Geolocation not supported in this browser');
                 return;
@@ -66,24 +71,16 @@ export function useDriverLocation(): UseDriverLocationReturn {
                 },
                 { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
             );
-            setIsTracking(true);
         } else {
-            // ── Native: expo-location ───────────────────────────────────────
-            // Dynamic import prevents tree-shaking issues on web builds
+            // Dynamic import avoids bundling expo-location into web chunks
             const Location = await import('expo-location');
-
             const { status } = await Location.requestForegroundPermissionsAsync();
             if (status !== 'granted') {
                 setError('Permiso de ubicación denegado');
                 return;
             }
-
             watchRef.current = await Location.watchPositionAsync(
-                {
-                    accuracy: Location.Accuracy.BestForNavigation,
-                    timeInterval: 5000,        // mínimo cada 5s
-                    distanceInterval: 10,      // o cada 10m
-                },
+                { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 5000, distanceInterval: 10 },
                 (loc) => {
                     setLocation({
                         latitude: loc.coords.latitude,
@@ -96,38 +93,13 @@ export function useDriverLocation(): UseDriverLocationReturn {
                     setError(null);
                 }
             );
-            setIsTracking(true);
-        }
-    }, [isTracking]);
-
-    const stopTracking = useCallback(() => {
-        if (!isTracking) return;
-
-        if (Platform.OS === 'web') {
-            if (watchRef.current != null && typeof navigator !== 'undefined' && navigator.geolocation) {
-                navigator.geolocation.clearWatch(watchRef.current);
-            }
-        } else {
-            // Expo native subscription has a .remove() method
-            watchRef.current?.remove?.();
         }
 
-        watchRef.current = null;
-        setIsTracking(false);
-    }, [isTracking]);
+        setIsTracking(true);
+    }, []); // stable — uses ref, not state
 
-    // Cleanup on unmount
-    useEffect(() => {
-        return () => {
-            if (Platform.OS === 'web') {
-                if (watchRef.current != null && typeof navigator !== 'undefined' && navigator.geolocation) {
-                    navigator.geolocation.clearWatch(watchRef.current);
-                }
-            } else {
-                watchRef.current?.remove?.();
-            }
-        };
-    }, []);
+    // Cleanup on unmount reuses stopTracking
+    useEffect(() => () => stopTracking(), [stopTracking]);
 
     return { location, error, isTracking, startTracking, stopTracking };
 }

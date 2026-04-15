@@ -16,7 +16,6 @@ import {
     ActivityIndicator,
     Vibration,
     Modal,
-    ScrollView,
     Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -99,18 +98,6 @@ const ESTADO_LABEL: Record<string, string> = {
     INCIDENTE: '⚠️ Incidente',
 };
 
-// Uber Health palette
-const COLORS = {
-    primary: '#00A878',
-    primaryDark: '#007A58',
-    surface: '#FFFFFF',
-    surfaceAlt: '#F8FAFB',
-    border: '#E8EDF2',
-    textPrimary: '#1A2332',
-    textSecondary: '#6B7A8D',
-    shadow: 'rgba(0,0,0,0.08)',
-};
-
 const STATUS_CONFIG: Record<string, { bg: string; text: string }> = {
     ASIGNADO:      { bg: '#FFF8E7', text: '#92400E' },
     ACEPTADO:      { bg: '#F0FDF4', text: '#15803D' },
@@ -123,17 +110,6 @@ const STATUS_CONFIG: Record<string, { bg: string; text: string }> = {
     INCIDENTE:     { bg: '#FEF2F2', text: '#DC2626' },
 };
 
-const ESTADO_COLOR: Record<string, string> = {
-    ASIGNADO: '#F59E0B',
-    ACEPTADO: '#10B981',
-    EN_CAMINO: '#3B82F6',
-    EN_ORIGEN: '#F97316',
-    EN_TRANSPORTE: '#8B5CF6',
-    EN_DESTINO: '#059669',
-    COMPLETADO: '#059669',
-    CANCELADO: '#EF4444',
-    INCIDENTE: '#DC2626',
-};
 
 const SIGUIENTE_ESTADO: Record<string, { label: string; estado: string; icon: string }> = {
     ACEPTADO: { label: 'Iniciar viaje', estado: 'EN_CAMINO', icon: 'navigate' },
@@ -167,8 +143,9 @@ export default function ServicesScreen() {
     const [showModalAsignacion, setShowModalAsignacion] = useState(false);
     const [countdown, setCountdown] = useState(COUNTDOWN_SEGUNDOS);
     const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-    // Nagging interval: reaparece cada 3 min si conductor no acepta
     const nagIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+    // Ref holds current assignment so the nagging interval always reads the latest value
+    const nagAsignacionRef = useRef<ProgramacionAsignada | null>(null);
 
     // ── Cargar servicios ────────────────────────────────────────────────────
     const loadServices = useCallback(async () => {
@@ -218,13 +195,16 @@ export default function ServicesScreen() {
     }, []);
 
     const startNagging = useCallback((asignacion: ProgramacionAsignada) => {
+        nagAsignacionRef.current = asignacion;
         clearNagging();
         nagIntervalRef.current = setInterval(() => {
+            const current = nagAsignacionRef.current;
+            if (!current) return;
             Vibration.vibrate([0, 400, 200, 400, 200, 400]);
-            setNuevaAsignacion(asignacion);
+            setNuevaAsignacion(current);
             setShowModalAsignacion(true);
             iniciarCountdown();
-        }, 3 * 60 * 1000); // 3 minutos
+        }, 3 * 60 * 1000);
     }, [clearNagging, iniciarCountdown]);
 
     // ── Socket events ───────────────────────────────────────────────────────
@@ -453,7 +433,7 @@ export default function ServicesScreen() {
 
         const statusCfg = STATUS_CONFIG[item.estado] || { bg: '#F3F4F6', text: '#374151' };
         const accentColor = item.estado === 'ASIGNADO' ? '#F59E0B'
-            : ESTADOS_ACTIVO.includes(item.estado) ? COLORS.primary
+            : ESTADOS_ACTIVO.includes(item.estado) ? '#00A878'
             : '#E5E7EB';
 
         return (
