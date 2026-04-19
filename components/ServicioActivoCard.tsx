@@ -59,27 +59,34 @@ export function ServicioActivoCard({ servicio, onActualizado }: Props) {
             )}
 
             {/* Clinica */}
-            <Text style={s.subtexto} numberOfLines={1}>{servicio.clinica.nombre}</Text>
+            {servicio.clinica.nombre ? (
+                <Text style={s.subtexto} numberOfLines={1}>🏥 {servicio.clinica.nombre}</Text>
+            ) : null}
 
             {/* Turno / Horario (programacion) */}
             {servicio.fuente === 'PROGRAMACION' && servicio.turno ? (
                 <Text style={s.horario}>
-                    {`Turno ${servicio.turno}`}
+                    {'Turno ' + servicio.turno}
                     {servicio.hora_inicio && servicio.hora_fin
-                        ? `  ·  ${servicio.hora_inicio.slice(0, 5)} — ${servicio.hora_fin.slice(0, 5)}`
+                        ? '  ·  ' + servicio.hora_inicio + ' — ' + servicio.hora_fin
                         : ''}
+                    {servicio.fecha ? '  ·  ' + servicio.fecha : ''}
                 </Text>
             ) : null}
 
-            {/* Origin / Destination */}
-            <View style={s.rutaRow}>
-                <Text style={s.rutaIcon}>📍</Text>
-                <Text style={s.rutaTx} numberOfLines={1}>{servicio.origen.direccion}</Text>
-            </View>
-            <View style={s.rutaRow}>
-                <Text style={s.rutaIcon}>🏥</Text>
-                <Text style={s.rutaTx} numberOfLines={1}>{servicio.destino.direccion}</Text>
-            </View>
+            {/* Origin / District */}
+            {servicio.origen.direccion ? (
+                <View style={s.rutaRow}>
+                    <Text style={s.rutaIcon}>📍</Text>
+                    <Text style={s.rutaTx} numberOfLines={1}>{servicio.origen.direccion}</Text>
+                </View>
+            ) : null}
+            {servicio.origen.referencia ? (
+                <View style={s.rutaRow}>
+                    <Text style={s.rutaIcon}>📌</Text>
+                    <Text style={s.rutaTx} numberOfLines={1}>{servicio.origen.referencia}</Text>
+                </View>
+            ) : null}
 
             {/* Action button — hidden when COMPLETADO */}
             {avance ? (

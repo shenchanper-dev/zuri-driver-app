@@ -16,6 +16,7 @@ export interface Servicio {
     // programacion fields
     doctor_nombre?: string;
     turno?: string;
+    fecha?: string;
     hora_inicio?: string;
     hora_fin?: string;
     paciente: {

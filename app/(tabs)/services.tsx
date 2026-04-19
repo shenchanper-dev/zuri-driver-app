@@ -44,9 +44,11 @@ export default function ServicesScreen() {
     const loadServices = useCallback(async () => {
         try {
             const response = await driverApi.getServices();
-            console.log('[ZURI] getServices response:', response.success, 'count:', response.servicios?.length);
+            console.log('[ZURI] getServices:', response.success, 'count:', response.servicios?.length, response.error || '');
             if (response.success) {
                 setServices(response.servicios ?? []);
+            } else {
+                console.warn('[ZURI] getServices failed:', response.error);
             }
         } catch (e) {
             console.error('[Services] loadServices error:', e);

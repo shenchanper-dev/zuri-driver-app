@@ -19,7 +19,11 @@ export function ServicioPendienteCard({ servicio, onAceptado }: Props) {
         if (loading) return;
         setLoading(true);
         try {
-            await driverApi.acceptService(servicio.id);
+            if (servicio.fuente === 'PROGRAMACION') {
+                await driverApi.responderProgramacion(servicio.id, 'ACEPTAR');
+            } else {
+                await driverApi.acceptService(servicio.id);
+            }
             onAceptado();
         } catch {
             Alert.alert('Error', 'No se pudo aceptar el servicio. Intenta de nuevo.');
@@ -38,19 +42,40 @@ export function ServicioPendienteCard({ servicio, onAceptado }: Props) {
                 </View>
             </View>
 
-            {/* Patient */}
-            <Text style={s.nombre} numberOfLines={1}>{servicio.paciente.nombre}</Text>
-            <Text style={s.subtexto} numberOfLines={1}>{servicio.clinica.nombre}</Text>
+            {/* Doctor / Patient */}
+            {servicio.fuente === 'PROGRAMACION' && servicio.doctor_nombre ? (
+                <Text style={s.nombre} numberOfLines={1}>Dr. {servicio.doctor_nombre}</Text>
+            ) : (
+                <Text style={s.nombre} numberOfLines={1}>{servicio.paciente.nombre}</Text>
+            )}
+            {servicio.clinica.nombre ? (
+                <Text style={s.subtexto} numberOfLines={1}>🏥 {servicio.clinica.nombre}</Text>
+            ) : null}
+
+            {/* Turno / Horario (programacion) */}
+            {servicio.fuente === 'PROGRAMACION' && servicio.turno ? (
+                <Text style={s.horario}>
+                    {'Turno ' + servicio.turno}
+                    {servicio.hora_inicio && servicio.hora_fin
+                        ? '  ·  ' + servicio.hora_inicio + ' — ' + servicio.hora_fin
+                        : ''}
+                    {servicio.fecha ? '  ·  ' + servicio.fecha : ''}
+                </Text>
+            ) : null}
 
             {/* Route */}
-            <View style={s.rutaRow}>
-                <Text style={s.rutaIcon}>📍</Text>
-                <Text style={s.rutaTx} numberOfLines={1}>{servicio.origen.direccion}</Text>
-            </View>
-            <View style={s.rutaRow}>
-                <Text style={s.rutaIcon}>🏥</Text>
-                <Text style={s.rutaTx} numberOfLines={1}>{servicio.destino.direccion}</Text>
-            </View>
+            {servicio.origen.direccion ? (
+                <View style={s.rutaRow}>
+                    <Text style={s.rutaIcon}>📍</Text>
+                    <Text style={s.rutaTx} numberOfLines={1}>{servicio.origen.direccion}</Text>
+                </View>
+            ) : null}
+            {servicio.origen.referencia ? (
+                <View style={s.rutaRow}>
+                    <Text style={s.rutaIcon}>📌</Text>
+                    <Text style={s.rutaTx} numberOfLines={1}>{servicio.origen.referencia}</Text>
+                </View>
+            ) : null}
 
             {/* Meta */}
             {servicio.tiempoEstimado != null || servicio.distanciaEstimada != null ? (
@@ -128,6 +153,11 @@ const s = StyleSheet.create({
     subtexto: {
         fontSize: 13,
         color: C.grisTexto,
+    },
+    horario: {
+        fontSize: 13,
+        color: C.grisTexto,
+        fontWeight: '600',
     },
     rutaRow: {
         flexDirection: 'row',
