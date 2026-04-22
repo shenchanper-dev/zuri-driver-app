@@ -9,6 +9,7 @@ import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Text, TouchableOpacity, Platform } from 'react-native';
 import { useAuthStore } from '@/stores/auth';
 import { Ionicons } from '@expo/vector-icons';
+import { setupNotificationChannel, setupNotificationListeners } from '@/services/notifications';
 
 // Error Boundary para capturar errores
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
@@ -129,6 +130,19 @@ function RootLayoutContent() {
     // Initial load
     useEffect(() => {
         initialize();
+    }, []);
+
+    // Setup notification channel (Android) + listeners
+    useEffect(() => {
+        const setup = async () => {
+            try {
+                await setupNotificationChannel();
+                setupNotificationListeners();
+            } catch (error) {
+                console.warn('[RootLayout] Error setting up notifications:', error);
+            }
+        };
+        setup();
     }, []);
 
     // Handle routing based on auth state

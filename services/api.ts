@@ -206,4 +206,8 @@ export const driverApi = {
     // Location
     updateLocation: (data: any) =>
         api.authPost('/drivers/location', data),
+
+    // Push Notifications
+    registerPushToken: (token: string) =>
+        api.authPost('/drivers/push-token', { token }),
 };

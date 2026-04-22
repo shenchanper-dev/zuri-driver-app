@@ -32,6 +32,9 @@
         "backgroundColor": "#0066CC"
       },
       "package": "pe.zuri.driver",
+      "versionCode": 1,
+      "compileSdkVersion": 35,
+      "targetSdkVersion": 35,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -61,6 +64,8 @@
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "Permitir que ZURI acceda a tu ubicación para tracking de servicios",
+          "locationWhenInUsePermission": "Tu ubicación se usa durante servicios activos",
+          "locationAlwaysPermission": "Tu ubicación es necesaria para tracking",
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true,
           "isIosBackgroundLocationEnabled": true
@@ -71,6 +76,15 @@
         "expo-local-authentication",
         {
           "faceIDPermission": "Usar Face ID para autenticación segura"
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#00875A",
+          "defaultChannel": "servicios-urgentes",
+          "modes": ["production"]
         }
       ],
       "expo-asset",

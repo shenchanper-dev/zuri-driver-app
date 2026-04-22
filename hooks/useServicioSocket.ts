@@ -18,6 +18,10 @@ export function useServicioSocket(callbacks: Callbacks) {
     const cbRef = useRef(callbacks);
     useEffect(() => { cbRef.current = callbacks; });
 
+    // Track IDs of assignments already shown to prevent duplicates
+    // (socket + FCM push can race and both emit for same assignment)
+    const shownIdsRef = useRef<Set<number>>(new Set());
+
     useEffect(() => {
         const handleAssigned = (data: any) => {
             if (Platform.OS !== 'web') {
@@ -25,6 +29,12 @@ export function useServicioSocket(callbacks: Callbacks) {
             }
 
             if (data?.tipo === 'programacion_detalle') {
+                // Deduplication: skip if already shown
+                if (shownIdsRef.current.has(data.id)) {
+                    console.log(`[useServicioSocket] Skipping duplicate assignment ${data.id}`);
+                    return;
+                }
+                shownIdsRef.current.add(data.id);
                 cbRef.current.onProgramacionAsignada(data as AsignacionProgramacion);
             } else {
                 cbRef.current.onServicioAsignado(data);

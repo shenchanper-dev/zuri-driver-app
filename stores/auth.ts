@@ -10,6 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { api } from '@/services/api';
 import { secureStorage, TOKEN_KEY } from '@/services/storage';
+import { registerForPushNotifications } from '@/services/notifications';
 
 // ============================================================================
 // Types
@@ -125,6 +126,11 @@ export const useAuthStore = create<AuthState>()(
                         // Store token securely
                         await secureStorage.setItem(TOKEN_KEY, response.token);
 
+                        // Register for push notifications (non-blocking)
+                        registerForPushNotifications().catch(err =>
+                            console.warn('[auth:push] Failed to register push token:', err)
+                        );
+
                         // Update state
                         set({
                             isAuthenticated: true,
@@ -199,6 +205,11 @@ export const useAuthStore = create<AuthState>()(
                     const response = await api.get('/drivers/auth', token);
 
                     if (response.success) {
+                        // Register for push notifications (non-blocking)
+                        registerForPushNotifications().catch(err =>
+                            console.warn('[auth:push] Failed to register push token:', err)
+                        );
+
                         set({
                             isAuthenticated: true,
                             conductor: response.conductor,

@@ -6,7 +6,6 @@ import {
     Platform,
 } from 'react-native';
 import { driverApi } from '@/services/api';
-import { requestNotificationPermissions } from '@/services/notifications';
 import { ServicioModal } from '@/components/ServicioModal';
 import { ServicioActivoCard } from '@/components/ServicioActivoCard';
 import { ServicioPendienteCard } from '@/components/ServicioPendienteCard';
@@ -59,7 +58,6 @@ export default function ServicesScreen() {
     }, []);
 
     useEffect(() => {
-        requestNotificationPermissions();
         loadServices();
     }, [loadServices]);
 

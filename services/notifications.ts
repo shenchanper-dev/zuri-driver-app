@@ -1,54 +1,55 @@
-/**
- * ZURI Driver App - Notification Service
- * Handles local notifications for service assignments
- * Note: expo-notifications is not supported in Expo Go SDK 53+
- * This module gracefully handles the absence of notifications
- */
-
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
 import { Platform } from 'react-native';
-import Constants from 'expo-constants';
+import { driverApi } from './api';
 
-// Check if we're running in Expo Go (notifications not supported)
-const isExpoGo = Constants.appOwnership === 'expo';
+// Configure notification handler for foreground notifications
+Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+    }),
+});
 
-// Dynamically import notifications only if not in Expo Go
-let Notifications: typeof import('expo-notifications') | null = null;
-
-async function loadNotifications() {
-    if (!isExpoGo && Platform.OS !== 'web') {
+/**
+ * Setup notification channel for Android (required for SDK 54+)
+ * MAX importance ensures high priority notifications break through DND
+ */
+export async function setupNotificationChannel() {
+    if (Platform.OS === 'android') {
         try {
-            Notifications = await import('expo-notifications');
-            Notifications.setNotificationHandler({
-                handleNotification: async () => ({
-                    shouldShowAlert: true,
-                    shouldPlaySound: true,
-                    shouldSetBadge: true,
-                    shouldShowBanner: true,
-                    shouldShowList: true,
-                }),
+            await Notifications.setNotificationChannelAsync('servicios-urgentes', {
+                name: 'Servicios Urgentes',
+                importance: Notifications.AndroidImportance.MAX,
+                vibrationPattern: [0, 500, 200, 500],
+                enableVibrate: true,
+                bypassDnd: true,
+                showBadge: true,
+                lightColor: '#00875A',
             });
-
+            console.log('[zuri:notifications] Channel servicios-urgentes configured');
         } catch (error) {
-            console.warn('⚠️ [Notifications] No disponible:', error);
+            console.error('[zuri:notifications] Error setting up channel:', error);
         }
-    } else {
-
     }
 }
 
-// Initialize on module load
-loadNotifications();
-
 /**
- * Request notification permissions
+ * Request notification permissions and register for push notifications
+ * Returns the push token if successful, null otherwise
  */
-export async function requestNotificationPermissions(): Promise<boolean> {
-    if (!Notifications || Platform.OS === 'web') {
-
-        return true;
-    }
-
+export async function registerForPushNotifications(): Promise<string | null> {
     try {
+        // Check if device supports notifications
+        if (!Device.isDevice) {
+            console.warn('[zuri:notifications] Not a physical device — push disabled');
+            return null;
+        }
+
+        // Request permission
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
         let finalStatus = existingStatus;
 
@@ -58,78 +59,72 @@ export async function requestNotificationPermissions(): Promise<boolean> {
         }
 
         if (finalStatus !== 'granted') {
-            console.warn('⚠️ [Notifications] Permiso denegado');
-            return false;
+            console.warn('[zuri:notifications] Push permission denied');
+            return null;
         }
 
-        return true;
+        // Get push token
+        const token = await Notifications.getExpoPushTokenAsync();
+        console.log('[zuri:notifications] Got push token:', token.data.substring(0, 40) + '...');
+
+        // Send token to backend
+        try {
+            await driverApi.registerPushToken(token.data);
+            console.log('[zuri:notifications] Push token registered with backend');
+        } catch (error) {
+            console.error('[zuri:notifications] Failed to register token with backend:', error);
+        }
+
+        return token.data;
+
     } catch (error) {
-        console.warn('⚠️ [Notifications] Error solicitando permisos:', error);
-        return true;
+        console.error('[zuri:notifications] Error registering for push:', error);
+        return null;
     }
 }
 
 /**
- * Show local notification for new service assignment
+ * Setup notification response listeners
+ */
+export function setupNotificationListeners(): () => void {
+    // Listen for notifications when app is in foreground
+    const notificationListener = Notifications.addNotificationReceivedListener((notification) => {
+        console.log('[zuri:notifications] Notification received (foreground):', notification.request.content.body);
+    });
+
+    // Listen for notification taps
+    const responseListener = Notifications.addNotificationResponseReceivedListener((response) => {
+        console.log('[zuri:notifications] Notification tapped:', response.notification.request.content.data);
+        // Could implement deep linking here if needed
+    });
+
+    // Return cleanup function
+    return () => {
+        notificationListener.remove();
+        responseListener.remove();
+    };
+}
+
+/**
+ * Legacy support: Show local notification for new service assignment
  */
 export async function showServiceAssignedNotification(service: {
     codigo: string;
     pacienteNombre: string;
     origenDireccion: string;
 }) {
-    if (!Notifications) {
-
-        return;
-    }
-
     try {
         await Notifications.scheduleNotificationAsync({
             content: {
                 title: '🚗 Nuevo Servicio Asignado',
                 body: `${service.pacienteNombre}\n📍 ${service.origenDireccion}`,
                 data: { serviceId: service.codigo },
-                sound: true,
+                sound: 'default',
                 priority: Notifications.AndroidNotificationPriority.HIGH,
             },
             trigger: null,
         });
     } catch (error) {
-        console.warn('⚠️ [Notifications] Error mostrando notificación:', error);
-    }
-}
-
-/**
- * Show notification for service update
- */
-export async function showServiceUpdatedNotification(message: string) {
-    if (!Notifications) {
-
-        return;
-    }
-
-    try {
-        await Notifications.scheduleNotificationAsync({
-            content: {
-                title: '📋 Actualización de Servicio',
-                body: message,
-                sound: false,
-            },
-            trigger: null,
-        });
-    } catch (error) {
-        console.warn('⚠️ [Notifications] Error:', error);
-    }
-}
-
-/**
- * Cancel all notifications
- */
-export async function cancelAllNotifications() {
-    if (!Notifications) return;
-
-    try {
-        await Notifications.cancelAllScheduledNotificationsAsync();
-    } catch (error) {
-        console.warn('⚠️ [Notifications] Error cancelando:', error);
+        console.warn('[zuri:notifications] Error showing notification:', error);
     }
 }
