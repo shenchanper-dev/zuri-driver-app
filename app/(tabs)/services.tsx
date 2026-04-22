@@ -34,11 +34,11 @@ export default function ServicesScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState<TabType>('pendientes');
 
-    // Programacion_detalle assignment notification
-    const [nuevaAsignacion, setNuevaAsignacion] = useState<AsignacionProgramacion | null>(null);
+    // ZURI-FIX 2026-04-22: Queue-based system for multiple consecutive assignments
+    // Fixes race condition where 2nd assignment overwrites 1st before ACEPTAR is pressed
+    const [queue, setQueue] = useState<AsignacionProgramacion[]>([]);
     const [showModalAsignacion, setShowModalAsignacion] = useState(false);
-    // Ref keeps assignment alive for nagging interval reads
-    const nagAsignacionRef = useRef<AsignacionProgramacion | null>(null);
+    const queueRef = useRef<AsignacionProgramacion[]>([]);
 
     // ── Load services ─────────────────────────────────────────────────────────
     const loadServices = useCallback(async () => {
@@ -66,9 +66,17 @@ export default function ServicesScreen() {
     // ── Socket events ─────────────────────────────────────────────────────────
     useServicioSocket({
         onProgramacionAsignada: (asignacion) => {
-            nagAsignacionRef.current = asignacion;
-            setNuevaAsignacion(asignacion);
-            setShowModalAsignacion(true);
+            setQueue(prev => {
+                // Avoid duplicate assignments in queue
+                if (prev.some(s => s.id === asignacion.id)) return prev;
+                const newQueue = [...prev, asignacion];
+                queueRef.current = newQueue;
+                return newQueue;
+            });
+            // Show modal if not already visible (only on first item)
+            if (!showModalAsignacion) {
+                setShowModalAsignacion(true);
+            }
         },
         onServicioAsignado: () => {
             loadServices();
@@ -79,22 +87,28 @@ export default function ServicesScreen() {
     });
 
     // ── Nagging ───────────────────────────────────────────────────────────────
-    // Active while there is a pending assignment that hasn't been accepted yet
-    const nagActivo = nuevaAsignacion !== null && !showModalAsignacion;
+    // Active while queue has items but modal is hidden (user closed it without answering)
+    const nagActivo = queue.length > 0 && !showModalAsignacion;
 
     useNagging(nagActivo, () => {
-        if (nagAsignacionRef.current) {
-            setNuevaAsignacion(nagAsignacionRef.current);
+        // Re-show modal with current (first) item from queue
+        if (queueRef.current && queueRef.current.length > 0) {
             setShowModalAsignacion(true);
         }
     });
 
     // ── Handlers ──────────────────────────────────────────────────────────────
     const handleAceptado = useCallback((_asignacion: AsignacionProgramacion) => {
-        // Clear pending assignment — stops nagging
-        nagAsignacionRef.current = null;
-        setNuevaAsignacion(null);
-        setShowModalAsignacion(false);
+        // Remove first item from queue
+        setQueue(prev => {
+            const newQueue = prev.slice(1);
+            queueRef.current = newQueue;
+            // If queue is empty, close modal; otherwise it re-renders with next item
+            if (newQueue.length === 0) {
+                setShowModalAsignacion(false);
+            }
+            return newQueue;
+        });
         loadServices();
     }, [loadServices]);
 
@@ -216,7 +230,7 @@ export default function ServicesScreen() {
             {/* Programacion_detalle assignment modal */}
             <ServicioModal
                 visible={showModalAsignacion}
-                asignacion={nuevaAsignacion}
+                asignacion={queue.length > 0 ? queue[0] : null}
                 onAceptado={handleAceptado}
             />
         </View>
