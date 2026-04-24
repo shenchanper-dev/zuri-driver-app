@@ -1,10 +1,3 @@
-/**
- * ZURI Driver App - Home Screen
- * - Botón verde apenas GPS arranca (no espera socket)
- * - Al conectarse verifica servicios pendientes en BD
- * - Tarjeta dinámica según estado real de servicios
- */
-
 import { useEffect, useState, useCallback } from 'react';
 import {
     View,
@@ -16,6 +9,8 @@ import {
     Alert,
     ActivityIndicator,
     Platform,
+    Image,
+    StatusBar,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -23,6 +18,7 @@ import { useAuthStore } from '@/stores/auth';
 import { useLocationStore } from '@/stores/location';
 import { driverApi } from '@/services/api';
 import { socket } from '@/services/socket';
+import { COLORS, FONT, SPACING, RADIUS, SHADOW } from '../../constants/theme';
 
 export default function HomeScreen() {
     const router = useRouter();
@@ -33,8 +29,6 @@ export default function HomeScreen() {
     const [isToggling, setIsToggling] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
     const [todayStats] = useState({ viajes: 0, km: 0 });
-
-    // Counters for dynamic home card
     const [serviciosResumen, setServiciosResumen] = useState({ pendientes: 0, activos: 0 });
 
     // ── Load service counters ─────────────────────────────────────────────────
@@ -73,7 +67,6 @@ export default function HomeScreen() {
                 );
             }
 
-            // Update counters from same response
             setServiciosResumen({
                 pendientes: pendientes.length,
                 activos: todos.filter((s: any) =>
@@ -111,7 +104,6 @@ export default function HomeScreen() {
                 // Release button immediately — don't wait for socket
                 setIsToggling(false);
 
-                // Socket in background + check pending services
                 socket.connect().then(connected => {
                     if (connected) useLocationStore.getState().setConnected(true);
                 });
@@ -177,281 +169,420 @@ export default function HomeScreen() {
         };
     }, [conductor?.id]);
 
-    const statusColor = isOnline ? '#10B981' : '#9CA3AF';
-    const iconName: 'power' | 'power-outline' = isOnline ? 'power' : 'power-outline';
+    // ── Derived display values ────────────────────────────────────────────────
+    const nombreCorto = conductor?.nombres
+        || conductor?.nombreCompleto?.split(' ')[0]
+        || 'Conductor';
+    const inicial = nombreCorto.charAt(0).toUpperCase();
 
     return (
-        <ScrollView
-            style={styles.container}
-            contentContainerStyle={styles.content}
-            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#00875A" />}
-        >
-            {/* ── Status Card ── */}
-            <View style={styles.statusCard}>
-                <View style={styles.statusHeader}>
-                    <View style={{ flex: 1 }}>
-                        <Text style={styles.statusLabel}>Estado actual</Text>
-                        <Text style={[styles.statusText, { color: statusColor }]}>
-                            {isOnline ? 'EN LÍNEA' : 'DESCONECTADO'}
-                        </Text>
-                    </View>
+        <View style={s.root}>
+            <StatusBar
+                barStyle="dark-content"
+                backgroundColor={COLORS.surface}
+                translucent={false}
+            />
 
-                    <TouchableOpacity
-                        style={[styles.statusToggle, { backgroundColor: statusColor }]}
-                        onPress={handleToggleStatus}
-                        disabled={isToggling}
-                        activeOpacity={0.8}
-                    >
-                        {isToggling
-                            ? <ActivityIndicator color="#fff" size="small" />
-                            : <Ionicons name={iconName} size={32} color="#fff" />
-                        }
-                    </TouchableOpacity>
-                </View>
+            {/* Map placeholder — replaced with real MapView in future phase */}
+            <View style={s.mapArea}>
+                <Ionicons name="map-outline" size={64} color={COLORS.borderStrong} />
+            </View>
 
-                {/* GPS + Server indicators */}
-                <View style={styles.indicators}>
-                    <View style={styles.indicator}>
-                        <View style={[styles.indicatorDot, isTracking && styles.indicatorActive]} />
-                        <Text style={styles.indicatorText}>GPS</Text>
+            {/* Bottom sheet card */}
+            <ScrollView
+                style={s.sheet}
+                contentContainerStyle={s.sheetContent}
+                refreshControl={
+                    <RefreshControl
+                        refreshing={refreshing}
+                        onRefresh={onRefresh}
+                        tintColor={COLORS.accent}
+                        colors={[COLORS.accent]}
+                    />
+                }
+                showsVerticalScrollIndicator={false}
+            >
+                {/* Header: Hola + avatar */}
+                <View style={s.headerRow}>
+                    <View>
+                        <Text style={s.greeting}>Hola,</Text>
+                        <Text style={s.driverName}>{nombreCorto}</Text>
                     </View>
-                    <View style={styles.indicator}>
-                        <View style={[styles.indicatorDot, isConnected && styles.indicatorActive]} />
-                        <Text style={styles.indicatorText}>Servidor</Text>
-                    </View>
-                    {isOnline && !isConnected && (
-                        <Text style={styles.httpFallback}>• Modo HTTP</Text>
+                    {conductor?.foto ? (
+                        <Image source={{ uri: conductor.foto }} style={s.avatar} />
+                    ) : (
+                        <View style={s.avatarFallback}>
+                            <Text style={s.avatarInitial}>{inicial}</Text>
+                        </View>
                     )}
                 </View>
-            </View>
 
-            {/* ── Dynamic service state card ── */}
-            {isOnline && (
-                serviciosResumen.activos > 0 ? (
+                <View style={s.sep} />
+
+                {/* Status section */}
+                <View style={s.statusSection}>
+                    {isOnline ? (
+                        <>
+                            <View style={s.onlineRow}>
+                                <View style={s.onlineBadge}>
+                                    <View style={s.onlineDot} />
+                                    <Text style={s.onlineBadgeText}>EN LÍNEA</Text>
+                                </View>
+                                <TouchableOpacity
+                                    onPress={handleToggleStatus}
+                                    disabled={isToggling}
+                                    activeOpacity={0.7}
+                                >
+                                    {isToggling
+                                        ? <ActivityIndicator color={COLORS.textMuted} size="small" />
+                                        : <Text style={s.disconnectText}>Desconectarse</Text>
+                                    }
+                                </TouchableOpacity>
+                            </View>
+                            <View style={s.pills}>
+                                <View style={[s.pill, isTracking && s.pillActive]}>
+                                    <View style={[s.pillDot, isTracking && s.pillDotActive]} />
+                                    <Text style={s.pillText}>GPS</Text>
+                                </View>
+                                <View style={[s.pill, isConnected && s.pillActive]}>
+                                    <View style={[s.pillDot, isConnected && s.pillDotActive]} />
+                                    <Text style={s.pillText}>Servidor</Text>
+                                </View>
+                                {isOnline && !isConnected && (
+                                    <Text style={s.httpFallback}>· Modo HTTP</Text>
+                                )}
+                            </View>
+                        </>
+                    ) : (
+                        <>
+                            <View style={s.offlineRow}>
+                                <View style={s.offlineDot} />
+                                <Text style={s.offlineText}>Estás fuera de servicio</Text>
+                            </View>
+                            <TouchableOpacity
+                                style={[s.connectBtn, isToggling && s.connectBtnDisabled]}
+                                onPress={handleToggleStatus}
+                                disabled={isToggling}
+                                activeOpacity={0.85}
+                            >
+                                {isToggling
+                                    ? <ActivityIndicator color={COLORS.textOnDark} size="small" />
+                                    : <Text style={s.connectBtnText}>CONECTARSE</Text>
+                                }
+                            </TouchableOpacity>
+                        </>
+                    )}
+                </View>
+
+                {/* Active service card */}
+                {isOnline && serviciosResumen.activos > 0 && (
                     <TouchableOpacity
-                        style={styles.estadoServicioCard}
+                        style={s.serviceCard}
                         onPress={() => router.push('/(tabs)/services')}
-                        activeOpacity={0.8}
+                        activeOpacity={0.85}
                     >
-                        <View style={styles.estadoIcono}>
-                            <Text style={{ fontSize: 28 }}>🚗</Text>
+                        <View style={s.serviceCardLeft}>
+                            <Text style={s.serviceCardTitle}>Servicio en curso</Text>
+                            <Text style={s.serviceCardSub}>Toca para ver detalles y avanzar estado</Text>
                         </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.estadoTitulo}>Servicio en curso</Text>
-                            <Text style={styles.estadoSubtitulo}>Toca para ver detalles y avanzar estado</Text>
-                        </View>
-                        <View style={styles.estadoBadge}>
-                            <Text style={styles.estadoBadgeText}>{serviciosResumen.activos}</Text>
-                        </View>
+                        <Ionicons name="chevron-forward" size={20} color={COLORS.accent} />
                     </TouchableOpacity>
-                ) : serviciosResumen.pendientes > 0 ? (
+                )}
+
+                {/* Queue banner — shows even when offline (assigned while offline) */}
+                {serviciosResumen.pendientes > 0 && (
                     <TouchableOpacity
-                        style={[styles.estadoServicioCard, { borderLeftColor: '#F59E0B' }]}
+                        style={s.queueBanner}
                         onPress={() => router.push('/(tabs)/services')}
-                        activeOpacity={0.8}
+                        activeOpacity={0.85}
                     >
-                        <View style={[styles.estadoIcono, { backgroundColor: '#FFFBEB' }]}>
-                            <Text style={{ fontSize: 28 }}>🔔</Text>
+                        <Ionicons name="notifications-outline" size={16} color={COLORS.warning} />
+                        <Text style={s.queueBannerText}>
+                            Tienes {serviciosResumen.pendientes} servicio{serviciosResumen.pendientes > 1 ? 's' : ''} por aceptar — toca aquí
+                        </Text>
+                    </TouchableOpacity>
+                )}
+
+                <View style={s.sep} />
+
+                {/* Resumen hoy */}
+                <View style={s.statsSection}>
+                    <Text style={s.statsSectionTitle}>Hoy</Text>
+                    <View style={s.statsRow}>
+                        <View style={s.statItem}>
+                            <Text style={s.statValue}>{todayStats.viajes}</Text>
+                            <Text style={s.statLabel}>Completados</Text>
                         </View>
-                        <View style={{ flex: 1 }}>
-                            <Text style={styles.estadoTitulo}>Tienes servicios asignados</Text>
-                            <Text style={styles.estadoSubtitulo}>
-                                {serviciosResumen.pendientes} servicio{serviciosResumen.pendientes > 1 ? 's' : ''} esperando tu respuesta
-                            </Text>
+                        <View style={s.statDiv} />
+                        <View style={s.statItem}>
+                            <Text style={s.statValue}>{serviciosResumen.activos}</Text>
+                            <Text style={s.statLabel}>Activos</Text>
                         </View>
-                        <View style={[styles.estadoBadge, { backgroundColor: '#FEF3C7' }]}>
-                            <Text style={[styles.estadoBadgeText, { color: '#92400E' }]}>
+                        <View style={s.statDiv} />
+                        <View style={s.statItem}>
+                            <Text style={[
+                                s.statValue,
+                                serviciosResumen.pendientes > 0 && { color: COLORS.warning },
+                            ]}>
                                 {serviciosResumen.pendientes}
                             </Text>
+                            <Text style={s.statLabel}>Pendientes</Text>
                         </View>
-                    </TouchableOpacity>
-                ) : (
-                    <View style={styles.esperandoCard}>
-                        <Text style={{ fontSize: 40, marginBottom: 12 }}>⏳</Text>
-                        <Text style={styles.esperandoTitulo}>Sin servicios asignados</Text>
-                        <Text style={styles.esperandoSubtitulo}>
-                            Te notificaremos cuando tengas un nuevo servicio
-                        </Text>
-                        <TouchableOpacity
-                            style={styles.btnVerHistorial}
-                            onPress={() => router.push('/(tabs)/services')}
-                        >
-                            <Text style={styles.btnVerHistorialText}>Ver historial</Text>
-                        </TouchableOpacity>
-                    </View>
-                )
-            )}
-
-            {/* ── Stats Hoy ── */}
-            <View style={styles.statsContainer}>
-                <Text style={styles.sectionTitle}>Hoy</Text>
-                <View style={styles.statsGrid}>
-                    <View style={styles.statCard}>
-                        <Ionicons name="car" size={24} color="#0066CC" />
-                        <Text style={styles.statValue}>{todayStats.viajes}</Text>
-                        <Text style={styles.statLabel}>Viajes</Text>
-                    </View>
-                    <View style={styles.statCard}>
-                        <Ionicons name="navigate" size={24} color="#10B981" />
-                        <Text style={styles.statValue}>{todayStats.km} km</Text>
-                        <Text style={styles.statLabel}>Distancia</Text>
-                    </View>
-                    <View style={styles.statCard}>
-                        <Ionicons name="star" size={24} color="#F59E0B" />
-                        <Text style={styles.statValue}>
-                            {conductor?.calificacion?.toFixed(1) || '--'}
-                        </Text>
-                        <Text style={styles.statLabel}>Rating</Text>
                     </View>
                 </View>
-            </View>
-
-            {/* ── Vehículo ── */}
-            <View style={styles.vehicleCard}>
-                <View style={styles.vehicleHeader}>
-                    <Ionicons name="car-sport" size={24} color="#0066CC" />
-                    <Text style={styles.vehicleTitle}>Mi Vehículo</Text>
-                </View>
-                <Text style={styles.vehiclePlate}>
-                    {conductor?.vehiculo?.placa || conductor?.placa || '---'}
-                </Text>
-                <Text style={styles.vehicleDetail}>
-                    {[conductor?.vehiculo?.marca || conductor?.marcaVehiculo,
-                    conductor?.vehiculo?.modelo || conductor?.modeloVehiculo]
-                        .filter(Boolean).join(' ') || ''}
-                </Text>
-            </View>
-        </ScrollView>
+            </ScrollView>
+        </View>
     );
 }
 
-const styles = StyleSheet.create({
-    container: { flex: 1, backgroundColor: '#F0F4F8' },
-    content: { paddingBottom: 32, paddingTop: Platform.OS === 'ios' ? 0 : 8 },
-    statusCard: {
-        backgroundColor: '#fff',
-        margin: 16,
-        marginBottom: 12,
-        borderRadius: 16,
-        padding: 20,
-        elevation: 3,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 8,
+const s = StyleSheet.create({
+    root: {
+        flex: 1,
+        backgroundColor: COLORS.surface,
+        paddingTop: Platform.OS === 'android' ? 0 : 0,
     },
-    statusHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-    statusLabel: { fontSize: 14, color: '#6B7280' },
-    statusText: { fontSize: 24, fontWeight: 'bold', marginTop: 4 },
-    statusToggle: {
-        width: 64, height: 64,
-        borderRadius: 32,
-        justifyContent: 'center', alignItems: 'center',
-        elevation: 2,
+    mapArea: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        backgroundColor: COLORS.surface,
     },
-    indicators: { flexDirection: 'row', marginTop: 20, gap: 20, flexWrap: 'wrap' },
-    indicator: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-    indicatorDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#D1D5DB' },
-    indicatorActive: { backgroundColor: '#10B981' },
-    indicatorText: { fontSize: 13, color: '#6B7280' },
-    httpFallback: { fontSize: 11, color: '#F59E0B', alignSelf: 'center' },
-    // Dynamic state card
-    estadoServicioCard: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: 16,
-        padding: 20,
-        marginHorizontal: 16,
-        marginBottom: 12,
+
+    // Bottom sheet
+    sheet: {
+        backgroundColor: COLORS.card,
+        borderTopLeftRadius: RADIUS.xl,
+        borderTopRightRadius: RADIUS.xl,
+        ...SHADOW.elevated,
+    },
+    sheetContent: {
+        paddingHorizontal: SPACING[4],
+        paddingTop: SPACING[5],
+        paddingBottom: SPACING[10],
+        gap: SPACING[4],
+    },
+
+    // Header row
+    headerRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    greeting: {
+        fontSize: FONT.sizes.sm,
+        fontWeight: FONT.weights.regular,
+        color: COLORS.textSecondary,
+    },
+    driverName: {
+        fontSize: FONT.sizes.xl,
+        fontWeight: FONT.weights.bold,
+        color: COLORS.textPrimary,
+        marginTop: 2,
+    },
+    avatar: {
+        width: 40,
+        height: 40,
+        borderRadius: RADIUS.pill,
+    },
+    avatarFallback: {
+        width: 40,
+        height: 40,
+        borderRadius: RADIUS.pill,
+        backgroundColor: COLORS.primary,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    avatarInitial: {
+        fontSize: FONT.sizes.base,
+        fontWeight: FONT.weights.bold,
+        color: COLORS.textOnDark,
+    },
+
+    // Separator
+    sep: {
+        height: 1,
+        backgroundColor: COLORS.border,
+    },
+
+    // Status
+    statusSection: {
+        gap: SPACING[3],
+    },
+    onlineRow: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+    },
+    onlineBadge: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 16,
-        borderLeftWidth: 4,
-        borderLeftColor: '#00875A',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.07,
-        shadowRadius: 8,
-        elevation: 3,
+        gap: SPACING[2],
+        backgroundColor: COLORS.successBg,
+        paddingHorizontal: SPACING[3],
+        paddingVertical: 5,
+        borderRadius: RADIUS.pill,
     },
-    estadoIcono: {
-        width: 56, height: 56,
-        backgroundColor: '#F0FDF4',
-        borderRadius: 28,
+    onlineDot: {
+        width: 8,
+        height: 8,
+        borderRadius: RADIUS.pill,
+        backgroundColor: COLORS.success,
+    },
+    onlineBadgeText: {
+        fontSize: FONT.sizes.xs,
+        fontWeight: FONT.weights.bold,
+        color: COLORS.success,
+        letterSpacing: 0.3,
+    },
+    disconnectText: {
+        fontSize: FONT.sizes.sm,
+        fontWeight: FONT.weights.medium,
+        color: COLORS.textMuted,
+    },
+    pills: {
+        flexDirection: 'row',
+        gap: SPACING[2],
+        flexWrap: 'wrap',
+    },
+    pill: {
+        flexDirection: 'row',
         alignItems: 'center',
+        gap: 5,
+        backgroundColor: COLORS.surface,
+        paddingHorizontal: SPACING[3],
+        paddingVertical: 6,
+        borderRadius: RADIUS.pill,
+    },
+    pillActive: {
+        backgroundColor: COLORS.successBg,
+    },
+    pillDot: {
+        width: 6,
+        height: 6,
+        borderRadius: RADIUS.pill,
+        backgroundColor: COLORS.borderStrong,
+    },
+    pillDotActive: {
+        backgroundColor: COLORS.success,
+    },
+    pillText: {
+        fontSize: FONT.sizes.xs,
+        fontWeight: FONT.weights.medium,
+        color: COLORS.textSecondary,
+    },
+    httpFallback: {
+        fontSize: FONT.sizes.xs,
+        color: COLORS.warning,
+        alignSelf: 'center',
+    },
+    offlineRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING[2],
+    },
+    offlineDot: {
+        width: 8,
+        height: 8,
+        borderRadius: RADIUS.pill,
+        backgroundColor: COLORS.textMuted,
+    },
+    offlineText: {
+        fontSize: FONT.sizes.sm,
+        color: COLORS.textSecondary,
+    },
+    connectBtn: {
+        backgroundColor: COLORS.primary,
+        height: 52,
+        borderRadius: RADIUS.md,
         justifyContent: 'center',
-    },
-    estadoTitulo: {
-        fontSize: 16,
-        fontWeight: '700',
-        color: '#0B1F3A',
-        marginBottom: 2,
-    },
-    estadoSubtitulo: {
-        fontSize: 13,
-        color: '#6B7280',
-        lineHeight: 18,
-    },
-    estadoBadge: {
-        backgroundColor: '#D1FAE5',
-        width: 36, height: 36,
-        borderRadius: 18,
         alignItems: 'center',
-        justifyContent: 'center',
     },
-    estadoBadgeText: {
-        fontSize: 16,
-        fontWeight: '800',
-        color: '#065F46',
+    connectBtnDisabled: {
+        backgroundColor: COLORS.borderStrong,
     },
-    esperandoCard: {
-        backgroundColor: '#FFFFFF',
-        borderRadius: 16,
-        padding: 32,
-        marginHorizontal: 16,
-        marginBottom: 12,
+    connectBtnText: {
+        fontSize: FONT.sizes.base,
+        fontWeight: FONT.weights.bold,
+        color: COLORS.textOnDark,
+        letterSpacing: 0.5,
+    },
+
+    // Active service card
+    serviceCard: {
+        flexDirection: 'row',
         alignItems: 'center',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.05,
-        shadowRadius: 4,
-        elevation: 2,
+        backgroundColor: COLORS.infoBg,
+        borderRadius: RADIUS.md,
+        padding: SPACING[4],
+        borderLeftWidth: 3,
+        borderLeftColor: COLORS.accent,
+        gap: SPACING[3],
     },
-    esperandoTitulo: {
-        fontSize: 17,
-        fontWeight: '700',
-        color: '#0B1F3A',
-        marginBottom: 8,
-        textAlign: 'center',
+    serviceCardLeft: {
+        flex: 1,
+        gap: 4,
     },
-    esperandoSubtitulo: {
-        fontSize: 14,
-        color: '#6B7280',
-        textAlign: 'center',
-        lineHeight: 20,
-        marginBottom: 20,
+    serviceCardTitle: {
+        fontSize: FONT.sizes.base,
+        fontWeight: FONT.weights.bold,
+        color: COLORS.accent,
     },
-    btnVerHistorial: {
-        backgroundColor: '#F0F4F8',
-        paddingHorizontal: 24,
-        paddingVertical: 10,
-        borderRadius: 20,
+    serviceCardSub: {
+        fontSize: FONT.sizes.xs,
+        color: COLORS.textSecondary,
     },
-    btnVerHistorialText: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#0B1F3A',
+
+    // Queue banner
+    queueBanner: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: SPACING[2],
+        backgroundColor: COLORS.warningBg,
+        borderRadius: RADIUS.md,
+        padding: SPACING[3],
+        borderWidth: 1,
+        borderColor: COLORS.warning,
     },
+    queueBannerText: {
+        flex: 1,
+        fontSize: FONT.sizes.sm,
+        fontWeight: FONT.weights.medium,
+        color: COLORS.textPrimary,
+    },
+
     // Stats
-    statsContainer: { marginHorizontal: 16, marginBottom: 12 },
-    sectionTitle: { fontSize: 18, fontWeight: '600', color: '#1F2937', marginBottom: 12 },
-    statsGrid: { flexDirection: 'row', gap: 12 },
-    statCard: { flex: 1, backgroundColor: '#fff', borderRadius: 12, padding: 16, alignItems: 'center', elevation: 1 },
-    statValue: { fontSize: 22, fontWeight: 'bold', color: '#1F2937', marginTop: 8 },
-    statLabel: { fontSize: 12, color: '#6B7280', marginTop: 4 },
-    // Vehicle
-    vehicleCard: { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 12, borderRadius: 16, padding: 20 },
-    vehicleHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 },
-    vehicleTitle: { fontSize: 16, fontWeight: '600', color: '#1F2937' },
-    vehiclePlate: { fontSize: 28, fontWeight: 'bold', color: '#0066CC', letterSpacing: 2 },
-    vehicleDetail: { fontSize: 14, color: '#6B7280', marginTop: 4 },
+    statsSection: {
+        gap: SPACING[3],
+    },
+    statsSectionTitle: {
+        fontSize: FONT.sizes.base,
+        fontWeight: FONT.weights.semibold,
+        color: COLORS.textPrimary,
+    },
+    statsRow: {
+        flexDirection: 'row',
+        backgroundColor: COLORS.surface,
+        borderRadius: RADIUS.md,
+        padding: SPACING[4],
+    },
+    statItem: {
+        flex: 1,
+        alignItems: 'center',
+        gap: 4,
+    },
+    statDiv: {
+        width: 1,
+        backgroundColor: COLORS.border,
+        marginVertical: SPACING[1],
+    },
+    statValue: {
+        fontSize: FONT.sizes.xxl,
+        fontWeight: FONT.weights.bold,
+        color: COLORS.textPrimary,
+    },
+    statLabel: {
+        fontSize: FONT.sizes.xs,
+        fontWeight: FONT.weights.regular,
+        color: COLORS.textSecondary,
+    },
 });
