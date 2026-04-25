@@ -120,7 +120,14 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
                     .leaflet-container { background:#d6d6d6; width:100%; height:100%; }
                     .leaflet-control-attribution { display:none !important; }
                 `}</style>
-                <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
+                <div
+                    ref={containerRef}
+                    style={{
+                        position: 'absolute',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        width: '100%', height: '100%',
+                    }}
+                />
             </View>
         );
     }
@@ -133,6 +140,8 @@ const st = StyleSheet.create({
         flex: 1,
         width: '100%',
         height: '100%',
+        position: 'relative',
+        overflow: 'hidden',
     },
     placeholder: {
         flex: 1,
