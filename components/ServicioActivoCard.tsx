@@ -4,20 +4,48 @@ import {
     ActivityIndicator, Alert, StyleSheet,
 } from 'react-native';
 import { driverApi } from '@/services/api';
-import type { Servicio, AccionProgresion } from '@/types/servicios';
-import { C, BADGE_CONFIG, ACCENT_COLOR, AVANCE_CONFIG } from '@/types/servicios';
+import type { Servicio } from '@/types/servicios';
+import { BADGE_CONFIG, ACCENT_COLOR, AVANCE_CONFIG } from '@/types/servicios';
+import { COLORS, RADIUS, SHADOW } from '@/constants/theme';
+
+const PASOS_ESTADO = ['ACEPTADO', 'EN_CAMINO', 'EN_ORIGEN', 'EN_TRANSPORTE', 'EN_DESTINO', 'COMPLETADO'] as const;
 
 interface Props {
     servicio: Servicio;
     onActualizado: () => void;
 }
 
+/** Compact horizontal stepper */
+function Stepper({ estado }: { estado: string }) {
+    const currentIdx = PASOS_ESTADO.indexOf(estado as typeof PASOS_ESTADO[number]);
+    return (
+        <View style={st.stepper}>
+            {PASOS_ESTADO.map((paso, idx) => {
+                const done = idx < currentIdx;
+                const current = idx === currentIdx;
+                return (
+                    <React.Fragment key={paso}>
+                        <View style={[
+                            st.dot,
+                            done && st.dotDone,
+                            current && st.dotCurrent,
+                        ]} />
+                        {idx < PASOS_ESTADO.length - 1 && (
+                            <View style={[st.line, done && st.lineDone]} />
+                        )}
+                    </React.Fragment>
+                );
+            })}
+        </View>
+    );
+}
+
 export function ServicioActivoCard({ servicio, onActualizado }: Props) {
     const [loading, setLoading] = useState(false);
 
-    const badge = BADGE_CONFIG[servicio.estado] ?? { bg: '#F3F4F6', text: '#374151', label: servicio.estado };
-    const accentColor = ACCENT_COLOR[servicio.estado] ?? C.borde;
-    const avance = AVANCE_CONFIG[servicio.estado];
+    const badge = BADGE_CONFIG[servicio.estado] ?? { bg: '#F4F5F7', text: '#5E6C84', label: servicio.estado };
+    const accentColor = ACCENT_COLOR[servicio.estado] ?? COLORS.border;
+    const avance = AVANCE_CONFIG[servicio.estado] ?? null;
 
     const handleAvanzar = async () => {
         if (!avance || loading) return;
@@ -38,7 +66,7 @@ export function ServicioActivoCard({ servicio, onActualizado }: Props) {
 
     return (
         <View style={[s.card, { borderLeftColor: accentColor }]}>
-            {/* Header row */}
+            {/* Header */}
             <View style={s.header}>
                 <View style={s.headerLeft}>
                     <Text style={s.codigo}>{servicio.codigo}</Text>
@@ -63,7 +91,7 @@ export function ServicioActivoCard({ servicio, onActualizado }: Props) {
                 <Text style={s.subtexto} numberOfLines={1}>🏥 {servicio.clinica.nombre}</Text>
             ) : null}
 
-            {/* Turno / Horario (programacion) */}
+            {/* Horario */}
             {servicio.fuente === 'PROGRAMACION' && servicio.turno ? (
                 <Text style={s.horario}>
                     {'Turno ' + servicio.turno}
@@ -74,21 +102,18 @@ export function ServicioActivoCard({ servicio, onActualizado }: Props) {
                 </Text>
             ) : null}
 
-            {/* Origin / District */}
+            {/* Origin */}
             {servicio.origen.direccion ? (
                 <View style={s.rutaRow}>
                     <Text style={s.rutaIcon}>📍</Text>
                     <Text style={s.rutaTx} numberOfLines={1}>{servicio.origen.direccion}</Text>
                 </View>
             ) : null}
-            {servicio.origen.referencia ? (
-                <View style={s.rutaRow}>
-                    <Text style={s.rutaIcon}>📌</Text>
-                    <Text style={s.rutaTx} numberOfLines={1}>{servicio.origen.referencia}</Text>
-                </View>
-            ) : null}
 
-            {/* Action button — hidden when COMPLETADO */}
+            {/* Stepper */}
+            <Stepper estado={servicio.estado} />
+
+            {/* Action button */}
             {avance ? (
                 <TouchableOpacity
                     style={[s.btn, { backgroundColor: avance.bg }, loading && s.btnDisabled]}
@@ -110,20 +135,55 @@ export function ServicioActivoCard({ servicio, onActualizado }: Props) {
     );
 }
 
+// ── Stepper styles ────────────────────────────────────────────────────────────
+const st = StyleSheet.create({
+    stepper: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginVertical: 10,
+    },
+    dot: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: COLORS.border,
+        borderWidth: 1.5,
+        borderColor: COLORS.border,
+    },
+    dotDone: {
+        backgroundColor: COLORS.accent,
+        borderColor: COLORS.accent,
+    },
+    dotCurrent: {
+        width: 14,
+        height: 14,
+        borderRadius: 7,
+        backgroundColor: '#ffffff',
+        borderColor: COLORS.accent,
+        borderWidth: 3,
+    },
+    line: {
+        flex: 1,
+        height: 2,
+        backgroundColor: COLORS.border,
+        marginHorizontal: 2,
+    },
+    lineDone: {
+        backgroundColor: COLORS.accent,
+    },
+});
+
+// ── Card styles ───────────────────────────────────────────────────────────────
 const s = StyleSheet.create({
     card: {
-        backgroundColor: C.card,
-        borderRadius: 16,
+        backgroundColor: COLORS.card,
+        borderRadius: RADIUS.lg,
         borderLeftWidth: 4,
         marginHorizontal: 16,
         marginVertical: 6,
         padding: 16,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.08,
-        shadowRadius: 8,
-        elevation: 3,
-        gap: 6,
+        ...SHADOW.card,
+        gap: 5,
     },
     header: {
         flexDirection: 'row',
@@ -139,17 +199,17 @@ const s = StyleSheet.create({
     codigo: {
         fontSize: 12,
         fontWeight: '700',
-        color: C.grisTexto,
+        color: COLORS.textSecondary,
         letterSpacing: 0.5,
     },
     fuente: {
         fontSize: 11,
-        color: C.grisTexto,
+        color: COLORS.textMuted,
     },
     badge: {
         paddingHorizontal: 10,
         paddingVertical: 3,
-        borderRadius: 20,
+        borderRadius: RADIUS.pill,
     },
     badgeTx: {
         fontSize: 11,
@@ -158,16 +218,16 @@ const s = StyleSheet.create({
     nombre: {
         fontSize: 17,
         fontWeight: '800',
-        color: C.azulTexto,
+        color: COLORS.textPrimary,
         lineHeight: 22,
     },
     subtexto: {
         fontSize: 13,
-        color: C.grisTexto,
+        color: COLORS.textSecondary,
     },
     horario: {
         fontSize: 13,
-        color: C.grisTexto,
+        color: COLORS.textSecondary,
         fontWeight: '600',
     },
     rutaRow: {
@@ -183,13 +243,13 @@ const s = StyleSheet.create({
     rutaTx: {
         flex: 1,
         fontSize: 13,
-        color: C.grisTexto,
+        color: COLORS.textSecondary,
         lineHeight: 18,
     },
     btn: {
-        marginTop: 10,
+        marginTop: 4,
         paddingVertical: 14,
-        borderRadius: 12,
+        borderRadius: RADIUS.md,
         alignItems: 'center',
     },
     btnDisabled: {
@@ -202,15 +262,15 @@ const s = StyleSheet.create({
         letterSpacing: 0.3,
     },
     completadoBadge: {
-        marginTop: 10,
+        marginTop: 4,
         paddingVertical: 10,
         alignItems: 'center',
-        backgroundColor: '#D1FAE5',
-        borderRadius: 12,
+        backgroundColor: '#E3FCEF',
+        borderRadius: RADIUS.md,
     },
     completadoTx: {
         fontSize: 14,
         fontWeight: '700',
-        color: '#065F46',
+        color: '#006644',
     },
 });
