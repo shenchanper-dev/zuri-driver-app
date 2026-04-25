@@ -19,11 +19,12 @@ import { useLocationStore } from '@/stores/location';
 import { driverApi } from '@/services/api';
 import { socket } from '@/services/socket';
 import { COLORS, FONT, SPACING, RADIUS, SHADOW } from '../../constants/theme';
+import { MapaDriver } from '@/components/MapaDriver';
 
 export default function HomeScreen() {
     const router = useRouter();
     const { conductor } = useAuthStore();
-    const { isTracking, iniciarTurno, finalizarTurno, verificarTurnoPeristido, isConnected } = useLocationStore();
+    const { isTracking, iniciarTurno, finalizarTurno, verificarTurnoPeristido, isConnected, currentLocation } = useLocationStore();
 
     const isOnline = isTracking;
     const [isToggling, setIsToggling] = useState(false);
@@ -178,14 +179,18 @@ export default function HomeScreen() {
     return (
         <View style={s.root}>
             <StatusBar
-                barStyle="dark-content"
-                backgroundColor={COLORS.surface}
+                barStyle="light-content"
+                backgroundColor="#000000"
                 translucent={false}
             />
 
-            {/* Map placeholder — replaced with real MapView in future phase */}
+            {/* Map — Leaflet on web, placeholder on native (react-native-maps in APK sprint) */}
             <View style={s.mapArea}>
-                <Ionicons name="map-outline" size={64} color={COLORS.borderStrong} />
+                <MapaDriver
+                    lat={currentLocation?.latitude ?? -12.1462}
+                    lng={currentLocation?.longitude ?? -76.9954}
+                    height="100%"
+                />
             </View>
 
             {/* Bottom sheet card */}
@@ -285,7 +290,7 @@ export default function HomeScreen() {
                             <Text style={s.serviceCardTitle}>Servicio en curso</Text>
                             <Text style={s.serviceCardSub}>Toca para ver detalles y avanzar estado</Text>
                         </View>
-                        <Ionicons name="chevron-forward" size={20} color={COLORS.accent} />
+                        <Ionicons name="chevron-forward" size={20} color={COLORS.textSecondary} />
                     </TouchableOpacity>
                 )}
 
@@ -338,21 +343,20 @@ export default function HomeScreen() {
 const s = StyleSheet.create({
     root: {
         flex: 1,
-        backgroundColor: COLORS.surface,
-        paddingTop: Platform.OS === 'android' ? 0 : 0,
+        backgroundColor: '#000000',
     },
     mapArea: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-        backgroundColor: COLORS.surface,
+        flex: 0.55,
+        backgroundColor: '#1F2937',
+        overflow: 'hidden',
     },
 
     // Bottom sheet
     sheet: {
+        flex: 0.45,
         backgroundColor: COLORS.card,
-        borderTopLeftRadius: RADIUS.xl,
-        borderTopRightRadius: RADIUS.xl,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
         ...SHADOW.elevated,
     },
     sheetContent: {
@@ -511,11 +515,11 @@ const s = StyleSheet.create({
     serviceCard: {
         flexDirection: 'row',
         alignItems: 'center',
-        backgroundColor: COLORS.infoBg,
+        backgroundColor: '#F8FAFC',
         borderRadius: RADIUS.md,
         padding: SPACING[4],
-        borderLeftWidth: 3,
-        borderLeftColor: COLORS.accent,
+        borderLeftWidth: 4,
+        borderLeftColor: COLORS.primary,
         gap: SPACING[3],
     },
     serviceCardLeft: {
@@ -525,7 +529,7 @@ const s = StyleSheet.create({
     serviceCardTitle: {
         fontSize: FONT.sizes.base,
         fontWeight: FONT.weights.bold,
-        color: COLORS.accent,
+        color: COLORS.textPrimary,
     },
     serviceCardSub: {
         fontSize: FONT.sizes.xs,
