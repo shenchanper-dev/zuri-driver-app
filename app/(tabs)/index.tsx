@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
     View, Text, StyleSheet, TouchableOpacity,
-    Alert, StatusBar,
+    Alert, StatusBar, Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/auth';
@@ -151,8 +151,10 @@ export default function HomeScreen() {
         || 'Conductor';
     const inicial = nombreCorto.charAt(0).toUpperCase();
 
+    const headerPaddingTop = Platform.OS === 'web' ? 16 : 50;
+
     return (
-        <View style={s.root}>
+        <View style={[s.root, Platform.OS === 'web' ? webRoot : null]}>
             <StatusBar barStyle="light-content" backgroundColor="#1F2937" translucent={false} />
 
             {/* MAPA FULLSCREEN */}
@@ -163,7 +165,7 @@ export default function HomeScreen() {
             />
 
             {/* HEADER FLOTANTE */}
-            <View style={s.headerCard} pointerEvents="box-none">
+            <View style={[s.headerCard, { paddingTop: headerPaddingTop }]} pointerEvents="box-none">
                 <View style={s.headerInner}>
                     <View style={s.headerLeft}>
                         <Text style={s.headerHola}>Hola,</Text>
@@ -211,7 +213,6 @@ const s = StyleSheet.create({
     headerCard: {
         position: 'absolute',
         top: 0, left: 0, right: 0,
-        paddingTop: 50,
         paddingHorizontal: SPACING[4],
         zIndex: 10,
     },
@@ -263,3 +264,12 @@ const s = StyleSheet.create({
     },
     fabIcon: { fontSize: 20 },
 });
+
+// Web-only override applied inline — keeps StyleSheet types clean
+// @ts-ignore
+const webRoot: any = {
+    position: 'fixed',
+    top: 0, left: 0, right: 0, bottom: 0,
+    height: '100dvh',
+    width: '100vw',
+};

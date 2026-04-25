@@ -140,7 +140,7 @@ const s = StyleSheet.create({
         borderTopLeftRadius: 28,
         borderTopRightRadius: 28,
         paddingHorizontal: SPACING[4],
-        paddingBottom: SPACING[6],
+        paddingBottom: Platform.OS === 'web' ? SPACING[8] : SPACING[6],
         ...SHADOW.modal,
     },
     handleZone: {
