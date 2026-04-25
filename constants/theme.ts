@@ -1,6 +1,6 @@
 /**
  * ZURI Driver — Design Tokens
- * Paleta: Opción A (Uber-inspired, negro + accent azul #276EF1)
+ * Paleta: Opción A (Uber-inspired, negro + accent slate #1F2937)
  * Creado: 2026-04-23 · Fase B.0
  * Notas:
  *  - Single source of truth para colores, tipografía, spacing, radios, sombras.
@@ -21,8 +21,8 @@ export const COLORS = {
   // ---- Brand ----
   primary:      '#000000',
   primaryHover: '#1A1A1A',
-  accent:       '#276EF1',
-  accentHover:  '#1E5ED6',
+  accent:       '#1F2937',
+  accentHover:  '#111827',
 
   // ---- Semánticos ----
   success:      '#05944F',
@@ -31,8 +31,8 @@ export const COLORS = {
   dangerBg:     '#FCE8E5',
   warning:      '#FFC043',
   warningBg:    '#FFF5DE',
-  info:         '#276EF1',
-  infoBg:       '#E6EEFD',
+  info:         '#1F2937',
+  infoBg:       '#F1F5F9',
 
   // ---- Texto ----
   textPrimary:   '#000000',
@@ -46,9 +46,9 @@ export const COLORS = {
     PROGRAMADO:    { bg: '#F2F2F2', text: '#545454', dot: '#8E8E93' },
     ASIGNADO:      { bg: '#FFF5DE', text: '#8A5A00', dot: '#FFC043' },
     ACEPTADO:      { bg: '#E6F4EC', text: '#05944F', dot: '#05944F' },
-    EN_CAMINO:     { bg: '#E6EEFD', text: '#1A4AB8', dot: '#276EF1' },
-    EN_ORIGEN:     { bg: '#E6EEFD', text: '#1A4AB8', dot: '#276EF1' },
-    EN_TRANSPORTE: { bg: '#E6EEFD', text: '#1A4AB8', dot: '#276EF1' },
+    EN_CAMINO:     { bg: '#F1F5F9', text: '#1F2937', dot: '#1F2937' },
+    EN_ORIGEN:     { bg: '#F1F5F9', text: '#1F2937', dot: '#1F2937' },
+    EN_TRANSPORTE: { bg: '#F1F5F9', text: '#1F2937', dot: '#1F2937' },
     EN_DESTINO:    { bg: '#E6F4EC', text: '#05944F', dot: '#05944F' },
     COMPLETADO:    { bg: '#E6F4EC', text: '#05944F', dot: '#05944F' },
     CANCELADO:     { bg: '#FCE8E5', text: '#B01200', dot: '#E11900' },
