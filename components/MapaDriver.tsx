@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
+import { useEffect, useRef, useImperativeHandle, forwardRef, useState } from 'react';
 import { Platform, View, StyleSheet } from 'react-native';
 
 interface MapaDriverProps {
@@ -18,6 +18,9 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
         const mapRef = useRef<any>(null);
         const markerRef = useRef<any>(null);
         const containerRef = useRef<HTMLDivElement>(null);
+        const wrapperRef = useRef<HTMLDivElement>(null);
+        const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+        const hasSize = !!size;
 
         useImperativeHandle(ref, () => ({
             recenter: () => {
@@ -26,12 +29,53 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
             },
         }));
 
+        // ── Measure wrapper dimensions on web ───────────────────────────────
+        useEffect(() => {
+            if (Platform.OS !== 'web') return;
+            if (!wrapperRef.current) return;
+
+            const wrap = wrapperRef.current;
+            const measure = () => {
+                const rect = wrap.getBoundingClientRect();
+                if (rect.width > 0 && rect.height > 0) {
+                    setSize(prev => {
+                        const w = Math.round(rect.width);
+                        const h = Math.round(rect.height);
+                        if (prev && prev.w === w && prev.h === h) return prev;
+                        return { w, h };
+                    });
+                }
+            };
+
+            measure();
+
+            let ro: ResizeObserver | null = null;
+            if (typeof ResizeObserver !== 'undefined') {
+                ro = new ResizeObserver(measure);
+                ro.observe(wrap);
+            }
+            window.addEventListener('resize', measure);
+            window.addEventListener('orientationchange', measure);
+
+            return () => {
+                if (ro) ro.disconnect();
+                window.removeEventListener('resize', measure);
+                window.removeEventListener('orientationchange', measure);
+            };
+        }, []);
+
+        // ── Initialize Leaflet ONCE when size first measured ────────────────
         useEffect(() => {
             if (Platform.OS !== 'web') return;
             if (!containerRef.current) return;
+            if (!size) return;
             if (mapRef.current) return;
 
+            let cancelled = false;
+
             import('leaflet').then((L) => {
+                if (cancelled || !containerRef.current) return;
+
                 delete (L.Icon.Default.prototype as any)._getIconUrl;
                 L.Icon.Default.mergeOptions({
                     iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
@@ -39,7 +83,7 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
                     shadowUrl:     'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
                 });
 
-                const map = L.map(containerRef.current!, {
+                const map = L.map(containerRef.current, {
                     zoomControl: false,
                     attributionControl: false,
                     dragging: true,
@@ -91,17 +135,34 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
 
                 mapRef.current = map;
                 markerRef.current = marker;
+
+                // Double invalidateSize for tile reload reliability
+                setTimeout(() => map.invalidateSize(), 100);
+                setTimeout(() => map.invalidateSize(), 500);
             });
 
             return () => {
+                cancelled = true;
                 if (mapRef.current) {
                     mapRef.current.remove();
                     mapRef.current = null;
                     markerRef.current = null;
                 }
             };
-        }, []);
+        }, [hasSize]);
 
+        // ── invalidateSize when size changes (resize/orientation, post-init) ─
+        useEffect(() => {
+            if (!mapRef.current || !size) return;
+            const t1 = setTimeout(() => mapRef.current?.invalidateSize(), 50);
+            const t2 = setTimeout(() => mapRef.current?.invalidateSize(), 250);
+            return () => {
+                clearTimeout(t1);
+                clearTimeout(t2);
+            };
+        }, [size]);
+
+        // ── Update marker position when coords change ───────────────────────
         useEffect(() => {
             if (!mapRef.current || !markerRef.current) return;
             if (!lat || !lng) return;
@@ -110,25 +171,36 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
             mapRef.current.panTo(latlng, { animate: true, duration: 0.5 });
         }, [lat, lng]);
 
+        // ── Native (APK future): placeholder ────────────────────────────────
         if (Platform.OS !== 'web') {
             return <View style={st.placeholder} />;
         }
 
+        // ── Web render ──────────────────────────────────────────────────────
         return (
-            <View style={st.wrapper}>
+            <div
+                ref={wrapperRef}
+                style={{
+                    position: 'absolute',
+                    inset: 0,
+                    overflow: 'hidden',
+                    backgroundColor: '#1F2937',
+                }}
+            >
                 <style>{`
-                    .leaflet-container { background:#d6d6d6; width:100%; height:100%; }
+                    .leaflet-container { background:#d6d6d6; }
                     .leaflet-control-attribution { display:none !important; }
                 `}</style>
-                <div
-                    ref={containerRef}
-                    style={{
-                        position: 'absolute',
-                        top: 0, left: 0, right: 0, bottom: 0,
-                        width: '100%', height: '100%',
-                    }}
-                />
-            </View>
+                {size && (
+                    <div
+                        ref={containerRef}
+                        style={{
+                            width: `${size.w}px`,
+                            height: `${size.h}px`,
+                        }}
+                    />
+                )}
+            </div>
         );
     }
 );
@@ -136,13 +208,6 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
 MapaDriver.displayName = 'MapaDriver';
 
 const st = StyleSheet.create({
-    wrapper: {
-        flex: 1,
-        width: '100%',
-        height: '100%',
-        position: 'relative',
-        overflow: 'hidden',
-    },
     placeholder: {
         flex: 1,
         backgroundColor: '#1F2937',
