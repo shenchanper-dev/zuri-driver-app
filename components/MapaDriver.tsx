@@ -13,6 +13,8 @@ export interface MapaDriverRef {
     recenter: () => void;
 }
 
+const MIN_DIM = 50;
+
 export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
     ({ lat, lng, zoom = 16 }, ref) => {
         const mapRef = useRef<any>(null);
@@ -20,7 +22,7 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
         const containerRef = useRef<HTMLDivElement>(null);
         const wrapperRef = useRef<HTMLDivElement>(null);
         const [size, setSize] = useState<{ w: number; h: number } | null>(null);
-        const hasSize = !!size;
+        const sizeIsValid = !!size && size.w >= MIN_DIM && size.h >= MIN_DIM;
 
         useImperativeHandle(ref, () => ({
             recenter: () => {
@@ -29,18 +31,19 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
             },
         }));
 
-        // ── Measure wrapper dimensions on web ───────────────────────────────
+        // ── Measure wrapper — multiple attempts to catch async layout ──────
         useEffect(() => {
             if (Platform.OS !== 'web') return;
             if (!wrapperRef.current) return;
 
             const wrap = wrapperRef.current;
+
             const measure = () => {
                 const rect = wrap.getBoundingClientRect();
                 if (rect.width > 0 && rect.height > 0) {
+                    const w = Math.round(rect.width);
+                    const h = Math.round(rect.height);
                     setSize(prev => {
-                        const w = Math.round(rect.width);
-                        const h = Math.round(rect.height);
                         if (prev && prev.w === w && prev.h === h) return prev;
                         return { w, h };
                     });
@@ -48,6 +51,9 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
             };
 
             measure();
+            const t1 = setTimeout(measure, 50);
+            const t2 = setTimeout(measure, 200);
+            const t3 = setTimeout(measure, 600);
 
             let ro: ResizeObserver | null = null;
             if (typeof ResizeObserver !== 'undefined') {
@@ -58,23 +64,26 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
             window.addEventListener('orientationchange', measure);
 
             return () => {
+                clearTimeout(t1);
+                clearTimeout(t2);
+                clearTimeout(t3);
                 if (ro) ro.disconnect();
                 window.removeEventListener('resize', measure);
                 window.removeEventListener('orientationchange', measure);
             };
         }, []);
 
-        // ── Initialize Leaflet ONCE when size first measured ────────────────
+        // ── Initialize Leaflet ONCE when size first valid ─────────────────
         useEffect(() => {
             if (Platform.OS !== 'web') return;
             if (!containerRef.current) return;
-            if (!size) return;
+            if (!sizeIsValid) return;
             if (mapRef.current) return;
 
             let cancelled = false;
 
             import('leaflet').then((L) => {
-                if (cancelled || !containerRef.current) return;
+                if (cancelled || !containerRef.current || mapRef.current) return;
 
                 delete (L.Icon.Default.prototype as any)._getIconUrl;
                 L.Icon.Default.mergeOptions({
@@ -99,46 +108,25 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
                 const driverIcon = L.divIcon({
                     html: `
                         <div style="position:relative;width:56px;height:56px;">
-                          <div style="
-                            position:absolute;inset:0;
-                            background:rgba(31,41,55,0.18);
-                            border-radius:50%;
-                            animation:zuriPulse 2s infinite;
-                          "></div>
-                          <div style="
-                            position:absolute;inset:8px;
-                            background:#1F2937;
-                            border:3px solid white;
-                            border-radius:50%;
-                            box-shadow:0 4px 12px rgba(0,0,0,0.35);
-                            display:flex;
-                            align-items:center;
-                            justify-content:center;
-                            font-size:18px;
-                          ">🚗</div>
+                          <div style="position:absolute;inset:0;background:rgba(31,41,55,0.18);border-radius:50%;animation:zuriPulse 2s infinite;"></div>
+                          <div style="position:absolute;inset:8px;background:#1F2937;border:3px solid white;border-radius:50%;box-shadow:0 4px 12px rgba(0,0,0,0.35);display:flex;align-items:center;justify-content:center;font-size:18px;">🚗</div>
                         </div>
-                        <style>
-                          @keyframes zuriPulse {
-                            0%   { transform:scale(0.7);opacity:0.9; }
-                            100% { transform:scale(1.5);opacity:0;   }
-                          }
-                        </style>
+                        <style>@keyframes zuriPulse{0%{transform:scale(0.7);opacity:0.9}100%{transform:scale(1.5);opacity:0}}</style>
                     `,
                     className: '',
                     iconSize: [56, 56],
                     iconAnchor: [28, 28],
                 });
 
-                const marker = L.marker([lat || -12.1462, lng || -76.9954], {
-                    icon: driverIcon,
-                }).addTo(map);
+                const marker = L.marker([lat || -12.1462, lng || -76.9954], { icon: driverIcon }).addTo(map);
 
                 mapRef.current = map;
                 markerRef.current = marker;
 
-                // Double invalidateSize for tile reload reliability
-                setTimeout(() => map.invalidateSize(), 100);
-                setTimeout(() => map.invalidateSize(), 500);
+                // Triple invalidateSize for tile reload reliability
+                setTimeout(() => map.invalidateSize(), 50);
+                setTimeout(() => map.invalidateSize(), 250);
+                setTimeout(() => map.invalidateSize(), 800);
             });
 
             return () => {
@@ -149,9 +137,9 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
                     markerRef.current = null;
                 }
             };
-        }, [hasSize]);
+        }, [sizeIsValid]);
 
-        // ── invalidateSize when size changes (resize/orientation, post-init) ─
+        // ── invalidateSize on subsequent size changes (resize/orientation) ─
         useEffect(() => {
             if (!mapRef.current || !size) return;
             const t1 = setTimeout(() => mapRef.current?.invalidateSize(), 50);
@@ -160,9 +148,9 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
                 clearTimeout(t1);
                 clearTimeout(t2);
             };
-        }, [size]);
+        }, [size?.w, size?.h]);
 
-        // ── Update marker position when coords change ───────────────────────
+        // ── Update marker position when coords change ──────────────────────
         useEffect(() => {
             if (!mapRef.current || !markerRef.current) return;
             if (!lat || !lng) return;
@@ -171,30 +159,28 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
             mapRef.current.panTo(latlng, { animate: true, duration: 0.5 });
         }, [lat, lng]);
 
-        // ── Native (APK future): placeholder ────────────────────────────────
+        // ── Native (APK future): placeholder ───────────────────────────────
         if (Platform.OS !== 'web') {
             return <View style={st.placeholder} />;
         }
 
-        // ── Web render ──────────────────────────────────────────────────────
+        // ── Web render — pixel-sized inner div, only when size valid ──────
         return (
             <div
                 ref={wrapperRef}
                 style={{
                     position: 'absolute',
-                    inset: 0,
+                    top: 0, left: 0, right: 0, bottom: 0,
                     overflow: 'hidden',
                     backgroundColor: '#1F2937',
                 }}
             >
-                <style>{`
-                    .leaflet-container { background:#d6d6d6; }
-                    .leaflet-control-attribution { display:none !important; }
-                `}</style>
-                {size && (
+                {sizeIsValid && size && (
                     <div
                         ref={containerRef}
                         style={{
+                            position: 'absolute',
+                            top: 0, left: 0,
                             width: `${size.w}px`,
                             height: `${size.h}px`,
                         }}
