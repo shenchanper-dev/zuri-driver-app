@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+    <title>ZURI Map</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: #d6d6d6;
+            overflow: hidden;
+        }
+        #map {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+        .leaflet-control-attribution { display: none !important; }
+        .driver-marker {
+            position: relative;
+            width: 56px;
+            height: 56px;
+        }
+        .driver-marker .pulse {
+            position: absolute;
+            inset: 0;
+            background: rgba(31, 41, 55, 0.18);
+            border-radius: 50%;
+            animation: zuriPulse 2s infinite;
+        }
+        .driver-marker .core {
+            position: absolute;
+            inset: 8px;
+            background: #1F2937;
+            border: 3px solid white;
+            border-radius: 50%;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+        }
+        @keyframes zuriPulse {
+            0%   { transform: scale(0.7); opacity: 0.9; }
+            100% { transform: scale(1.5); opacity: 0;   }
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        (function () {
+            // Default to Lima centro mientras llega la ubicación real
+            var DEFAULT_LAT = -12.1462;
+            var DEFAULT_LNG = -76.9954;
+            var DEFAULT_ZOOM = 16;
+
+            var map = L.map('map', {
+                zoomControl: false,
+                attributionControl: false,
+                dragging: true,
+                touchZoom: true,
+                scrollWheelZoom: false,
+                doubleClickZoom: true,
+            }).setView([DEFAULT_LAT, DEFAULT_LNG], DEFAULT_ZOOM);
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                maxZoom: 19,
+            }).addTo(map);
+
+            var driverIcon = L.divIcon({
+                html: '<div class="driver-marker"><div class="pulse"></div><div class="core">🚗</div></div>',
+                className: '',
+                iconSize: [56, 56],
+                iconAnchor: [28, 28],
+            });
+
+            var marker = L.marker([DEFAULT_LAT, DEFAULT_LNG], { icon: driverIcon }).addTo(map);
+
+            // Forzar redimensión después de que el iframe complete su layout
+            setTimeout(function () { map.invalidateSize(); }, 100);
+            setTimeout(function () { map.invalidateSize(); }, 500);
+            window.addEventListener('resize', function () { map.invalidateSize(); });
+            window.addEventListener('orientationchange', function () {
+                setTimeout(function () { map.invalidateSize(); }, 200);
+            });
+
+            // ── Recibir mensajes desde la app driver (parent window) ───
+            window.addEventListener('message', function (event) {
+                var msg = event.data || {};
+                if (msg.type === 'updateLocation' && typeof msg.lat === 'number' && typeof msg.lng === 'number') {
+                    var ll = [msg.lat, msg.lng];
+                    marker.setLatLng(ll);
+                    if (msg.recenter) {
+                        map.flyTo(ll, msg.zoom || DEFAULT_ZOOM, { duration: 0.8 });
+                    } else {
+                        map.panTo(ll, { animate: true, duration: 0.5 });
+                    }
+                } else if (msg.type === 'recenter' && typeof msg.lat === 'number' && typeof msg.lng === 'number') {
+                    map.flyTo([msg.lat, msg.lng], msg.zoom || DEFAULT_ZOOM, { duration: 0.8 });
+                } else if (msg.type === 'invalidate') {
+                    map.invalidateSize();
+                }
+            });
+
+            // ── Notificar al parent que el mapa está listo ─────────────
+            try {
+                window.parent.postMessage({ type: 'mapReady' }, '*');
+            } catch (e) { /* ignore */ }
+        })();
+    </script>
+</body>
+</html>

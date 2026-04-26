@@ -136,6 +136,7 @@ const s = StyleSheet.create({
     sheet: {
         position: 'absolute',
         left: 0, right: 0, bottom: 0,
+        zIndex: 10,
         backgroundColor: COLORS.card,
         borderTopLeftRadius: 28,
         borderTopRightRadius: 28,
@@ -163,7 +164,7 @@ const s = StyleSheet.create({
         gap: 8,
     },
     statusDot: { width: 10, height: 10, borderRadius: 5 },
-    dotOnline:  { backgroundColor: COLORS.success },
+    dotOnline: { backgroundColor: COLORS.success },
     dotOffline: { backgroundColor: COLORS.textMuted },
     statusTx: {
         fontSize: FONT.sizes.base,
@@ -180,7 +181,7 @@ const s = StyleSheet.create({
         marginBottom: SPACING[3],
     },
     btnCtaSecondary: { backgroundColor: COLORS.surface },
-    btnCtaDisabled:  { backgroundColor: COLORS.borderStrong },
+    btnCtaDisabled: { backgroundColor: COLORS.borderStrong },
     btnCtaTx: {
         color: COLORS.textOnDark,
         fontSize: FONT.sizes.base,
@@ -253,7 +254,7 @@ const s = StyleSheet.create({
         fontWeight: FONT.weights.bold,
         color: COLORS.textPrimary,
     },
-    statNumActive:  { color: COLORS.success },
+    statNumActive: { color: COLORS.success },
     statNumPending: { color: COLORS.warning },
     statLbl: {
         fontSize: 11,
