@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useImperativeHandle, forwardRef, useState } from 'react';
+import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { Platform, View, StyleSheet } from 'react-native';
 
 interface MapaDriverProps {
@@ -13,16 +13,12 @@ export interface MapaDriverRef {
     recenter: () => void;
 }
 
-const MIN_DIM = 50;
-
 export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
     ({ lat, lng, zoom = 16 }, ref) => {
         const mapRef = useRef<any>(null);
         const markerRef = useRef<any>(null);
         const containerRef = useRef<HTMLDivElement>(null);
-        const wrapperRef = useRef<HTMLDivElement>(null);
-        const [size, setSize] = useState<{ w: number; h: number } | null>(null);
-        const sizeIsValid = !!size && size.w >= MIN_DIM && size.h >= MIN_DIM;
+        const roRef = useRef<ResizeObserver | null>(null);
 
         useImperativeHandle(ref, () => ({
             recenter: () => {
@@ -31,53 +27,10 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
             },
         }));
 
-        // ── Measure wrapper — multiple attempts to catch async layout ──────
-        useEffect(() => {
-            if (Platform.OS !== 'web') return;
-            if (!wrapperRef.current) return;
-
-            const wrap = wrapperRef.current;
-
-            const measure = () => {
-                const rect = wrap.getBoundingClientRect();
-                if (rect.width > 0 && rect.height > 0) {
-                    const w = Math.round(rect.width);
-                    const h = Math.round(rect.height);
-                    setSize(prev => {
-                        if (prev && prev.w === w && prev.h === h) return prev;
-                        return { w, h };
-                    });
-                }
-            };
-
-            measure();
-            const t1 = setTimeout(measure, 50);
-            const t2 = setTimeout(measure, 200);
-            const t3 = setTimeout(measure, 600);
-
-            let ro: ResizeObserver | null = null;
-            if (typeof ResizeObserver !== 'undefined') {
-                ro = new ResizeObserver(measure);
-                ro.observe(wrap);
-            }
-            window.addEventListener('resize', measure);
-            window.addEventListener('orientationchange', measure);
-
-            return () => {
-                clearTimeout(t1);
-                clearTimeout(t2);
-                clearTimeout(t3);
-                if (ro) ro.disconnect();
-                window.removeEventListener('resize', measure);
-                window.removeEventListener('orientationchange', measure);
-            };
-        }, []);
-
-        // ── Initialize Leaflet ONCE when size first valid ─────────────────
+        // ── Init Leaflet once on mount ─────────────────────────────────────
         useEffect(() => {
             if (Platform.OS !== 'web') return;
             if (!containerRef.current) return;
-            if (!sizeIsValid) return;
             if (mapRef.current) return;
 
             let cancelled = false;
@@ -123,32 +76,35 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
                 mapRef.current = map;
                 markerRef.current = marker;
 
-                // Triple invalidateSize for tile reload reliability
-                setTimeout(() => map.invalidateSize(), 50);
-                setTimeout(() => map.invalidateSize(), 250);
-                setTimeout(() => map.invalidateSize(), 800);
+                // ResizeObserver: re-measure on any container size change
+                if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+                    const ro = new ResizeObserver(() => {
+                        if (mapRef.current) mapRef.current.invalidateSize();
+                    });
+                    ro.observe(containerRef.current);
+                    roRef.current = ro;
+                }
+
+                // Multiple invalidateSize at increasing delays to catch async layout
+                setTimeout(() => map.invalidateSize(), 0);
+                setTimeout(() => map.invalidateSize(), 100);
+                setTimeout(() => map.invalidateSize(), 500);
+                setTimeout(() => map.invalidateSize(), 1500);
             });
 
             return () => {
                 cancelled = true;
+                if (roRef.current) {
+                    roRef.current.disconnect();
+                    roRef.current = null;
+                }
                 if (mapRef.current) {
                     mapRef.current.remove();
                     mapRef.current = null;
                     markerRef.current = null;
                 }
             };
-        }, [sizeIsValid]);
-
-        // ── invalidateSize on subsequent size changes (resize/orientation) ─
-        useEffect(() => {
-            if (!mapRef.current || !size) return;
-            const t1 = setTimeout(() => mapRef.current?.invalidateSize(), 50);
-            const t2 = setTimeout(() => mapRef.current?.invalidateSize(), 250);
-            return () => {
-                clearTimeout(t1);
-                clearTimeout(t2);
-            };
-        }, [size?.w, size?.h]);
+        }, []);
 
         // ── Update marker position when coords change ──────────────────────
         useEffect(() => {
@@ -164,10 +120,9 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
             return <View style={st.placeholder} />;
         }
 
-        // ── Web render — pixel-sized inner div, only when size valid ──────
+        // ── Web: nested position:absolute inset:0 — explicit dims via CSS ─
         return (
             <div
-                ref={wrapperRef}
                 style={{
                     position: 'absolute',
                     top: 0, left: 0, right: 0, bottom: 0,
@@ -175,17 +130,15 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
                     backgroundColor: '#1F2937',
                 }}
             >
-                {sizeIsValid && size && (
-                    <div
-                        ref={containerRef}
-                        style={{
-                            position: 'absolute',
-                            top: 0, left: 0,
-                            width: `${size.w}px`,
-                            height: `${size.h}px`,
-                        }}
-                    />
-                )}
+                <div
+                    ref={containerRef}
+                    style={{
+                        position: 'absolute',
+                        top: 0, left: 0, right: 0, bottom: 0,
+                        width: '100%',
+                        height: '100%',
+                    }}
+                />
             </div>
         );
     }

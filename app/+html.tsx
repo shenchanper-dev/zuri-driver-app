@@ -84,10 +84,8 @@ const globalCSS = `
     min-height: 0 !important;
   }
 
-  /* Leaflet — guarantee container fills its parent */
+  /* Leaflet — only set background; component controls dimensions via inset:0 */
   .leaflet-container {
-    width: 100% !important;
-    height: 100% !important;
     background: #d6d6d6;
   }
   .leaflet-control-attribution { display: none !important; }
