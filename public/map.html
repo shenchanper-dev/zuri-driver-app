@@ -23,29 +23,60 @@
             height: 100%;
         }
         .leaflet-control-attribution { display: none !important; }
+
+        /* ── Driver marker ─────────────────────────────────────────── */
         .driver-marker {
             position: relative;
-            width: 56px;
-            height: 56px;
+            width: 48px;
+            height: 64px;
         }
+        /* Pulse ring — circular glow around the center of the car */
         .driver-marker .pulse {
             position: absolute;
-            inset: 0;
+            top: 50%;
+            left: 50%;
+            width: 40px;
+            height: 40px;
+            margin-top: -20px;
+            margin-left: -20px;
             background: rgba(31, 41, 55, 0.18);
             border-radius: 50%;
             animation: zuriPulse 2s infinite;
+            z-index: 0;
         }
+        /* SVG car wrapper — centered, sits above pulse */
         .driver-marker .core {
             position: absolute;
-            inset: 8px;
-            background: #1F2937;
-            border: 3px solid white;
-            border-radius: 50%;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 40px;
+            height: 56px;
+            z-index: 1;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 18px;
+            filter: drop-shadow(0 4px 8px rgba(0,0,0,0.4));
+        }
+        /* Vehicle type badge — top-right of the marker */
+        .driver-marker .badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            width: 22px;
+            height: 22px;
+            background: white;
+            border: 2px solid #1F2937;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            line-height: 1;
+            z-index: 2;
+        }
+        .driver-marker .badge:empty {
+            display: none;
         }
         @keyframes zuriPulse {
             0%   { transform: scale(0.7); opacity: 0.9; }
@@ -57,9 +88,8 @@
     <div id="map"></div>
     <script>
         (function () {
-            // Default to Lima centro mientras llega la ubicación real
-            var DEFAULT_LAT = -12.1462;
-            var DEFAULT_LNG = -76.9954;
+            var DEFAULT_LAT  = -12.1462;
+            var DEFAULT_LNG  = -76.9954;
             var DEFAULT_ZOOM = 16;
 
             var map = L.map('map', {
@@ -75,16 +105,49 @@
                 maxZoom: 19,
             }).addTo(map);
 
+            // ── SVG car (top-down) — same as admin RealTimeDriverMap ──
+            var carSVG = `<svg width="40" height="56" viewBox="0 0 40 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="20" cy="50" rx="12" ry="4" fill="rgba(0,0,0,0.2)" />
+  <polygon points="20,0 26,8 14,8" fill="#1a1a1a" stroke="white" stroke-width="1.2" />
+  <rect x="10" y="8" width="20" height="38" rx="6" ry="6" fill="#1a1a1a" stroke="white" stroke-width="1.5" />
+  <rect x="13" y="13" width="14" height="8" rx="2" fill="#93c5fd" opacity="0.85" stroke="#60a5fa" stroke-width="0.5" />
+  <rect x="13" y="33" width="14" height="6" rx="2" fill="#60a5fa" opacity="0.6" stroke="#3b82f6" stroke-width="0.5" />
+  <rect x="11" y="9" width="4" height="2.5" rx="1" fill="#fde047" stroke="#facc15" stroke-width="0.3" />
+  <rect x="25" y="9" width="4" height="2.5" rx="1" fill="#fde047" stroke="#facc15" stroke-width="0.3" />
+  <rect x="11" y="43" width="4" height="2" rx="0.8" fill="#ef4444" stroke="#dc2626" stroke-width="0.3" />
+  <rect x="25" y="43" width="4" height="2" rx="0.8" fill="#ef4444" stroke="#dc2626" stroke-width="0.3" />
+  <rect x="7" y="16" width="3" height="5" rx="1.5" fill="#1a1a1a" stroke="white" stroke-width="0.8" />
+  <rect x="30" y="16" width="3" height="5" rx="1.5" fill="#1a1a1a" stroke="white" stroke-width="0.8" />
+  <rect x="14" y="22" width="12" height="10" rx="2" fill="#2d2d2d" stroke="#404040" stroke-width="0.5" />
+</svg>`;
+
             var driverIcon = L.divIcon({
-                html: '<div class="driver-marker"><div class="pulse"></div><div class="core">🚗</div></div>',
+                html: '<div class="driver-marker"><div class="pulse"></div><div class="core">' + carSVG + '</div><div class="badge"></div></div>',
                 className: '',
-                iconSize: [56, 56],
-                iconAnchor: [28, 28],
+                iconSize: [48, 64],
+                iconAnchor: [24, 56],
             });
 
             var marker = L.marker([DEFAULT_LAT, DEFAULT_LNG], { icon: driverIcon }).addTo(map);
 
-            // Forzar redimensión después de que el iframe complete su layout
+            // ── Vehicle type badge emojis ──────────────────────────────
+            var VEHICLE_EMOJIS = {
+                'WHEELCHAIR': '♿',
+                'OXYGEN':     '⛽',
+                'STRETCHER':  '🛏️',
+                'RAMP':       '🚐',
+                'BARIATRIC':  '⚕️',
+                'REGULAR':    '',
+            };
+
+            function updateBadge(vehicleType) {
+                var badge = document.querySelector('.driver-marker .badge');
+                if (badge) {
+                    badge.textContent = VEHICLE_EMOJIS[vehicleType] || '';
+                }
+            }
+
+            // ── Resize & orientation ──────────────────────────────────
             setTimeout(function () { map.invalidateSize(); }, 100);
             setTimeout(function () { map.invalidateSize(); }, 500);
             window.addEventListener('resize', function () { map.invalidateSize(); });
@@ -92,9 +155,10 @@
                 setTimeout(function () { map.invalidateSize(); }, 200);
             });
 
-            // ── Recibir mensajes desde la app driver (parent window) ───
+            // ── Recibir mensajes desde la app driver (parent window) ──
             window.addEventListener('message', function (event) {
                 var msg = event.data || {};
+
                 if (msg.type === 'updateLocation' && typeof msg.lat === 'number' && typeof msg.lng === 'number') {
                     var ll = [msg.lat, msg.lng];
                     marker.setLatLng(ll);
@@ -107,6 +171,8 @@
                     map.flyTo([msg.lat, msg.lng], msg.zoom || DEFAULT_ZOOM, { duration: 0.8 });
                 } else if (msg.type === 'invalidate') {
                     map.invalidateSize();
+                } else if (msg.type === 'updateVehicleType') {
+                    updateBadge(msg.vehicleType);
                 }
             });
 
