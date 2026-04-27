@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
     View, Text, StyleSheet, TouchableOpacity,
-    Alert, StatusBar, Platform,
+    Alert, StatusBar, Platform, Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/auth';
@@ -11,6 +11,7 @@ import { socket } from '@/services/socket';
 import { COLORS, FONT, SPACING, RADIUS, SHADOW } from '../../constants/theme';
 import { MapaDriver, MapaDriverRef } from '@/components/MapaDriver';
 import { HomeBottomSheet } from '@/components/HomeBottomSheet';
+import { ChatScreen } from '@/components/ChatScreen';
 
 export default function HomeScreen() {
     const router = useRouter();
@@ -22,20 +23,24 @@ export default function HomeScreen() {
 
     const mapRef = useRef<MapaDriverRef>(null);
     const isOnline = isTracking;
-    const [isToggling, setIsToggling] = useState(false);
+    const [isToggling, setIsToggling]           = useState(false);
     const [serviciosResumen, setServiciosResumen] = useState({ pendientes: 0, activos: 0 });
+    const [servicioActivoId, setServicioActivoId] = useState<number | null>(null);
+    const [chatOpen, setChatOpen]               = useState(false);
 
     // ── Load service counters ─────────────────────────────────────────────────
     const refrescarResumen = useCallback(async () => {
         try {
             const res = await driverApi.getServices();
             const todos: any[] = res.servicios ?? [];
+            const activos = todos.filter((s: any) =>
+                ['ACEPTADO', 'EN_CAMINO', 'EN_ORIGEN', 'EN_TRANSPORTE', 'EN_DESTINO'].includes(s.estado)
+            );
             setServiciosResumen({
                 pendientes: todos.filter((s: any) => s.estado === 'ASIGNADO').length,
-                activos: todos.filter((s: any) =>
-                    ['ACEPTADO', 'EN_CAMINO', 'EN_ORIGEN', 'EN_TRANSPORTE', 'EN_DESTINO'].includes(s.estado)
-                ).length,
+                activos: activos.length,
             });
+            setServicioActivoId(activos[0]?.id ?? null);
         } catch {
             // Silently ignore — home is informational only
         }
@@ -57,12 +62,11 @@ export default function HomeScreen() {
                     ]
                 );
             }
-            setServiciosResumen({
-                pendientes: pendientes.length,
-                activos: todos.filter((s: any) =>
-                    ['ACEPTADO', 'EN_CAMINO', 'EN_ORIGEN', 'EN_TRANSPORTE', 'EN_DESTINO'].includes(s.estado)
-                ).length,
-            });
+            const activos = todos.filter((s: any) =>
+                ['ACEPTADO', 'EN_CAMINO', 'EN_ORIGEN', 'EN_TRANSPORTE', 'EN_DESTINO'].includes(s.estado)
+            );
+            setServiciosResumen({ pendientes: pendientes.length, activos: activos.length });
+            setServicioActivoId(activos[0]?.id ?? null);
         } catch (e) {
             console.error('[ZURI] Error verificando pendientes al conectar:', e);
         }
@@ -198,7 +202,29 @@ export default function HomeScreen() {
                 }}
                 hasServicioActivo={isOnline && serviciosResumen.activos > 0}
                 onOpenServicioActivo={() => router.push('/(tabs)/services')}
+                onOpenChat={servicioActivoId ? () => setChatOpen(true) : undefined}
             />
+
+            {/* CHAT MODAL */}
+            <Modal
+                visible={chatOpen}
+                animationType="slide"
+                onRequestClose={() => setChatOpen(false)}
+                presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
+            >
+                {chatOpen && servicioActivoId && conductor?.id && (
+                    <ChatScreen
+                        servicioId={servicioActivoId}
+                        conductorId={conductor.id}
+                        conductorNombre={
+                            conductor.nombres
+                            || conductor.nombreCompleto?.split(' ')[0]
+                            || 'Conductor'
+                        }
+                        onClose={() => setChatOpen(false)}
+                    />
+                )}
+            </Modal>
         </View>
     );
 }

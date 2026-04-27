@@ -23,6 +23,8 @@ interface HomeBottomSheetProps {
     };
     hasServicioActivo?: boolean;
     onOpenServicioActivo?: () => void;
+    onOpenChat?: () => void;
+    chatUnreadCount?: number;
 }
 
 export function HomeBottomSheet({
@@ -32,6 +34,8 @@ export function HomeBottomSheet({
     stats,
     hasServicioActivo = false,
     onOpenServicioActivo,
+    onOpenChat,
+    chatUnreadCount = 0,
 }: HomeBottomSheetProps) {
     const translateY = useRef(new Animated.Value(SHEET_FULL - SHEET_PEEK)).current;
     const lastOffset = useRef(SHEET_FULL - SHEET_PEEK);
@@ -93,18 +97,43 @@ export function HomeBottomSheet({
 
             {/* Servicio activo strip */}
             {hasServicioActivo && (
-                <TouchableOpacity style={s.activoStrip} onPress={onOpenServicioActivo} activeOpacity={0.85}>
-                    <View style={s.activoLeft}>
-                        <View style={s.activoIconBox}>
-                            <Text style={s.activoIcon}>🩺</Text>
+                <View style={s.activoStrip}>
+                    {/* Main tap area → ir a servicios */}
+                    <TouchableOpacity
+                        style={s.activoStripMain}
+                        onPress={onOpenServicioActivo}
+                        activeOpacity={0.85}
+                    >
+                        <View style={s.activoLeft}>
+                            <View style={s.activoIconBox}>
+                                <Text style={s.activoIcon}>🩺</Text>
+                            </View>
+                            <View>
+                                <Text style={s.activoTitle}>Servicio en curso</Text>
+                                <Text style={s.activoSub}>Toca para avanzar estado</Text>
+                            </View>
                         </View>
-                        <View>
-                            <Text style={s.activoTitle}>Servicio en curso</Text>
-                            <Text style={s.activoSub}>Toca para avanzar estado</Text>
-                        </View>
-                    </View>
-                    <Text style={s.activoArrow}>›</Text>
-                </TouchableOpacity>
+                        <Text style={s.activoArrow}>›</Text>
+                    </TouchableOpacity>
+                    {/* Chat button */}
+                    {onOpenChat && (
+                        <TouchableOpacity
+                            style={s.btnChat}
+                            onPress={onOpenChat}
+                            activeOpacity={0.85}
+                            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                        >
+                            <Text style={s.btnChatIcon}>💬</Text>
+                            {chatUnreadCount > 0 && (
+                                <View style={s.chatBadge}>
+                                    <Text style={s.chatBadgeTx}>
+                                        {chatUnreadCount > 9 ? '9+' : chatUnreadCount}
+                                    </Text>
+                                </View>
+                            )}
+                        </TouchableOpacity>
+                    )}
+                </View>
             )}
 
             <View style={s.divider} />
@@ -193,13 +222,19 @@ const s = StyleSheet.create({
     activoStrip: {
         backgroundColor: '#F8FAFC',
         borderRadius: RADIUS.md,
-        padding: SPACING[3],
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'space-between',
         marginBottom: SPACING[3],
         borderLeftWidth: 4,
         borderLeftColor: COLORS.primary,
+        overflow: 'hidden',
+    },
+    activoStripMain: {
+        flex: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: SPACING[3],
     },
     activoLeft: {
         flexDirection: 'row',
@@ -228,6 +263,33 @@ const s = StyleSheet.create({
         fontSize: 28,
         color: COLORS.textMuted,
         lineHeight: 32,
+    },
+    btnChat: {
+        width: 48,
+        height: '100%' as any,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: COLORS.accent,
+        borderTopRightRadius: RADIUS.md,
+        borderBottomRightRadius: RADIUS.md,
+    },
+    btnChatIcon: { fontSize: 20 },
+    chatBadge: {
+        position: 'absolute',
+        top: 6, right: 6,
+        minWidth: 18, height: 18,
+        borderRadius: 9,
+        backgroundColor: COLORS.danger,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 4,
+        borderWidth: 2,
+        borderColor: '#F8FAFC',
+    },
+    chatBadgeTx: {
+        color: COLORS.textOnDark,
+        fontSize: 10,
+        fontWeight: FONT.weights.bold,
     },
 
     divider: {
