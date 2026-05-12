@@ -9,6 +9,7 @@ import {
 import { COLORS, FONT, SPACING, RADIUS, SHADOW } from '../constants/theme';
 import { chatSocket, MensajeChat } from '../services/chatSocket';
 import { useTextToSpeech } from '../hooks/useTextToSpeech';
+import { useSpeechToText } from '../hooks/useSpeechToText';
 
 interface ChatScreenProps {
     servicioId: number;
@@ -32,6 +33,15 @@ export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }
     const lastSpokenIdRef     = useRef<number | null>(null);
 
     const tts = useTextToSpeech();
+    const stt = useSpeechToText();
+
+    // STT: cuando llega transcript, inyectarlo en input y resetear
+    useEffect(() => {
+        if (stt.transcript) {
+            setInput(prev => (prev ? prev + ' ' : '') + stt.transcript);
+            stt.reset();
+        }
+    }, [stt.transcript]);
 
     // Keep ref in sync so event callbacks have current value without stale closure
     useEffect(() => {
@@ -236,6 +246,15 @@ export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }
                     onSubmitEditing={handleSend}
                     blurOnSubmit={false}
                 />
+                {stt.isSupported && (
+                    <TouchableOpacity
+                        style={[s.btnMic, stt.isListening && s.btnMicListening]}
+                        onPress={() => (stt.isListening ? stt.stop() : stt.start())}
+                        activeOpacity={0.85}
+                    >
+                        <Text style={s.btnMicTx}>{stt.isListening ? '⏺' : '🎤'}</Text>
+                    </TouchableOpacity>
+                )}
                 <TouchableOpacity
                     style={[s.btnSend, (!input.trim() || !conectado) && s.btnSendDisabled]}
                     onPress={handleSend}
@@ -475,5 +494,21 @@ const s = StyleSheet.create({
         fontSize: 22,
         fontWeight: FONT.weights.bold,
         marginTop: -1,
+    },
+    btnMic: {
+        width: 44, height: 44,
+        borderRadius: 22,
+        backgroundColor: COLORS.surface,
+        borderWidth: 1,
+        borderColor: COLORS.border,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    btnMicListening: {
+        backgroundColor: '#ef4444',
+        borderColor: '#ef4444',
+    },
+    btnMicTx: {
+        fontSize: 20,
     },
 });
