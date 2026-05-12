@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { COLORS, FONT, SPACING, RADIUS, SHADOW } from '../constants/theme';
 import { chatSocket, MensajeChat } from '../services/chatSocket';
+import { useTextToSpeech } from '../hooks/useTextToSpeech';
 
 interface ChatScreenProps {
     servicioId: number;
@@ -28,6 +29,9 @@ export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }
     const typingTimeoutRef    = useRef<ReturnType<typeof setTimeout> | null>(null);
     const lastTypingSentRef   = useRef<number>(0);
     const conversacionIdRef   = useRef<number | null>(null);
+    const lastSpokenIdRef     = useRef<number | null>(null);
+
+    const tts = useTextToSpeech();
 
     // Keep ref in sync so event callbacks have current value without stale closure
     useEffect(() => {
@@ -104,6 +108,21 @@ export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }
         }
     }, [mensajes.length, otroEscribiendo]);
 
+    // ── TTS: leer mensajes de Zuri AI ─────────────────────────────
+    useEffect(() => {
+        if (!tts.isSupported || !tts.enabled || mensajes.length === 0) return;
+        const last = mensajes[mensajes.length - 1];
+        if (
+            last.autor_tipo === 'SISTEMA' &&
+            last.autor_nombre === 'Zuri AI' &&
+            last.id !== lastSpokenIdRef.current
+        ) {
+            lastSpokenIdRef.current = last.id;
+            const limpio = last.contenido.replace(/^🤖\s*Zuri:\s*/, '').trim();
+            if (limpio) tts.speak(limpio);
+        }
+    }, [mensajes, tts]);
+
     // ── Typing con throttle 1.5 s ─────────────────────────────────
     const handleInputChange = (text: string) => {
         setInput(text);
@@ -155,7 +174,19 @@ export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }
                         </Text>
                     </View>
                 </View>
-                <View style={s.headerRight} />
+                {tts.isSupported ? (
+                    <TouchableOpacity
+                        style={s.headerRight}
+                        onPress={tts.toggle}
+                        hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                    >
+                        <Text style={[s.headerBackTx, !tts.enabled && { opacity: 0.4 }]}>
+                            {tts.isSpeaking ? '🔊' : tts.enabled ? '🔉' : '🔇'}
+                        </Text>
+                    </TouchableOpacity>
+                ) : (
+                    <View style={s.headerRight} />
+                )}
             </View>
 
             {/* Mensajes */}
