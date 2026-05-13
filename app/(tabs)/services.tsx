@@ -13,14 +13,15 @@ import { ServicioHistorialCard } from '@/components/ServicioHistorialCard';
 import { useServicioSocket } from '@/hooks/useServicioSocket';
 import { useNagging } from '@/hooks/useNagging';
 import type { Servicio, AsignacionProgramacion, TabType } from '@/types/servicios';
-import { C, ESTADOS_PENDIENTE, ESTADOS_ACTIVO, ESTADOS_HISTORIAL } from '@/types/servicios';
+import { ESTADOS_PENDIENTE, ESTADOS_ACTIVO, ESTADOS_HISTORIAL } from '@/types/servicios';
+import { COLORS, RADIUS, SHADOW } from '@/constants/theme';
 
 // ── Tab labels ────────────────────────────────────────────────────────────────
 
 const TAB_LABELS: Record<TabType, string> = {
     pendientes: 'Pendientes',
-    activos:    'Activos',
-    historial:  'Historial',
+    activos: 'Activos',
+    historial: 'Historial',
 };
 
 const TABS: TabType[] = ['pendientes', 'activos', 'historial'];
@@ -97,16 +98,13 @@ export default function ServicesScreen() {
 
     // ── Handlers ──────────────────────────────────────────────────────────────
     const handleAceptado = useCallback((_asignacion: AsignacionProgramacion) => {
-        // Remove first item from queue
-        setQueue(prev => {
-            const newQueue = prev.slice(1);
-            queueRef.current = newQueue;
-            // If queue is empty, close modal; otherwise it re-renders with next item
-            if (newQueue.length === 0) {
-                setShowModalAsignacion(false);
-            }
-            return newQueue;
-        });
+        // Compute new queue synchronously via ref to avoid setState-inside-setState anti-pattern
+        const newQueue = queueRef.current.slice(1);
+        queueRef.current = newQueue;
+        setQueue([...newQueue]);
+        if (newQueue.length === 0) {
+            setShowModalAsignacion(false);
+        }
         loadServices();
     }, [loadServices]);
 
@@ -117,8 +115,8 @@ export default function ServicesScreen() {
 
     // ── Tab counts ────────────────────────────────────────────────────────────
     const pendientes = services.filter(s => (ESTADOS_PENDIENTE as readonly string[]).includes(s.estado));
-    const activos    = services.filter(s => (ESTADOS_ACTIVO    as readonly string[]).includes(s.estado));
-    const historial  = services.filter(s => (ESTADOS_HISTORIAL as readonly string[]).includes(s.estado));
+    const activos = services.filter(s => (ESTADOS_ACTIVO as readonly string[]).includes(s.estado));
+    const historial = services.filter(s => (ESTADOS_HISTORIAL as readonly string[]).includes(s.estado));
 
     const tabData: Record<TabType, Servicio[]> = { pendientes, activos, historial };
 
@@ -219,8 +217,8 @@ export default function ServicesScreen() {
                     <RefreshControl
                         refreshing={refreshing}
                         onRefresh={onRefresh}
-                        tintColor={C.verde}
-                        colors={[C.verde]}
+                        tintColor={COLORS.accent}
+                        colors={[COLORS.accent]}
                     />
                 }
             />
@@ -240,10 +238,10 @@ export default function ServicesScreen() {
 const s = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: C.fondo,
+        backgroundColor: COLORS.bg,
     },
     header: {
-        backgroundColor: C.header,
+        backgroundColor: COLORS.primary,
         paddingTop: Platform.OS === 'ios' ? 60 : 48,
         paddingBottom: 16,
         paddingHorizontal: 20,
@@ -259,9 +257,9 @@ const s = StyleSheet.create({
     },
     tabBar: {
         flexDirection: 'row',
-        backgroundColor: C.card,
+        backgroundColor: COLORS.card,
         borderBottomWidth: 1,
-        borderBottomColor: C.borde,
+        borderBottomColor: COLORS.border,
         paddingHorizontal: 8,
     },
     tab: {
@@ -269,37 +267,38 @@ const s = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        paddingVertical: 12,
+        paddingVertical: 13,
         gap: 6,
-        borderBottomWidth: 2,
+        borderBottomWidth: 2.5,
         borderBottomColor: 'transparent',
     },
     tabActive: {
-        borderBottomColor: C.verde,
+        borderBottomColor: COLORS.accent,
     },
     tabTx: {
         fontSize: 13,
         fontWeight: '600',
-        color: C.grisTexto,
+        color: COLORS.textSecondary,
     },
     tabTxActive: {
-        color: C.verde,
+        color: COLORS.accent,
+        fontWeight: '700',
     },
     tabBadge: {
-        backgroundColor: C.borde,
-        borderRadius: 10,
-        paddingHorizontal: 6,
+        backgroundColor: COLORS.border,
+        borderRadius: RADIUS.pill,
+        paddingHorizontal: 7,
         paddingVertical: 1,
         minWidth: 20,
         alignItems: 'center',
     },
     tabBadgeActive: {
-        backgroundColor: C.verde,
+        backgroundColor: COLORS.accent,
     },
     tabBadgeTx: {
         fontSize: 11,
         fontWeight: '700',
-        color: C.grisTexto,
+        color: COLORS.textSecondary,
     },
     tabBadgeTxActive: {
         color: '#fff',
@@ -317,31 +316,31 @@ const s = StyleSheet.create({
         gap: 12,
     },
     emptyIcon: {
-        fontSize: 48,
+        fontSize: 52,
     },
     emptyTitulo: {
         fontSize: 17,
         fontWeight: '700',
-        color: C.azulTexto,
+        color: COLORS.textPrimary,
         textAlign: 'center',
     },
     emptySubtitulo: {
         fontSize: 14,
-        color: C.grisTexto,
+        color: COLORS.textSecondary,
         textAlign: 'center',
         lineHeight: 20,
         paddingHorizontal: 24,
     },
     emptyBoton: {
         marginTop: 4,
-        backgroundColor: C.fondo,
+        backgroundColor: COLORS.bg,
         paddingHorizontal: 24,
         paddingVertical: 10,
-        borderRadius: 20,
+        borderRadius: RADIUS.pill,
     },
     emptyBotonTx: {
         fontSize: 14,
         fontWeight: '600',
-        color: C.azulTexto,
+        color: COLORS.textPrimary,
     },
 });
