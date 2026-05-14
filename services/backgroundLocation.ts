@@ -72,10 +72,6 @@ export async function startBackgroundLocation(conductorId: number): Promise<void
         accuracy: Location.Accuracy.Balanced,
         distanceInterval: 50,   // meters
         timeInterval: 30_000,   // ms
-        deferredUpdatesInterval: 0,
-        showsBackgroundLocationIndicator: true,
-        pausesUpdatesAutomatically: false,
-        activityType: Location.ActivityType.AutomotiveNavigation,
         foregroundService: {
             notificationTitle: '🚗 ZURI — Turno Activo',
             notificationBody: 'GPS activo · Tu posición se está compartiendo',
