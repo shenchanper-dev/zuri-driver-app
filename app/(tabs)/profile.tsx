@@ -16,6 +16,7 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/auth';
 import { useLocationStore } from '@/stores/location';
 import { socket } from '@/services/socket';
+import { COLORS, RADIUS, SHADOW } from '@/constants/theme';
 
 export default function ProfileScreen() {
     const router = useRouter();
@@ -179,11 +180,11 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#f5f5f5',
+        backgroundColor: COLORS.bg,
     },
     header: {
-        backgroundColor: '#0066CC',
-        paddingTop: 32,
+        backgroundColor: COLORS.primary,
+        paddingTop: 48,
         paddingBottom: 32,
         alignItems: 'center',
     },
@@ -201,7 +202,7 @@ const styles = StyleSheet.create({
         width: 100,
         height: 100,
         borderRadius: 50,
-        backgroundColor: 'rgba(255,255,255,0.3)',
+        backgroundColor: 'rgba(255,255,255,0.25)',
         justifyContent: 'center',
         alignItems: 'center',
         borderWidth: 3,
@@ -241,10 +242,10 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: 4,
         marginTop: 12,
-        backgroundColor: 'rgba(255,255,255,0.2)',
+        backgroundColor: 'rgba(255,255,255,0.18)',
         paddingHorizontal: 12,
         paddingVertical: 6,
-        borderRadius: 16,
+        borderRadius: RADIUS.pill,
     },
     rating: {
         fontSize: 16,
@@ -256,15 +257,18 @@ const styles = StyleSheet.create({
         color: 'rgba(255,255,255,0.8)',
     },
     section: {
-        backgroundColor: '#fff',
-        marginTop: 16,
+        backgroundColor: COLORS.card,
+        marginTop: 12,
+        marginHorizontal: 16,
+        borderRadius: RADIUS.md,
         paddingHorizontal: 16,
         paddingVertical: 16,
+        ...SHADOW.card,
     },
     sectionTitle: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#888',
+        fontSize: 12,
+        fontWeight: '700',
+        color: COLORS.textMuted,
         marginBottom: 12,
         textTransform: 'uppercase',
         letterSpacing: 1,
@@ -274,31 +278,33 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         gap: 12,
         paddingVertical: 8,
+        borderBottomWidth: 1,
+        borderBottomColor: COLORS.border,
     },
     infoText: {
-        fontSize: 16,
-        color: '#333',
+        fontSize: 15,
+        color: COLORS.textPrimary,
     },
     vehicleCard: {
-        backgroundColor: '#f5f5f5',
+        backgroundColor: COLORS.bg,
         padding: 16,
-        borderRadius: 12,
+        borderRadius: RADIUS.sm,
         alignItems: 'center',
     },
     vehiclePlate: {
         fontSize: 28,
         fontWeight: 'bold',
-        color: '#0066CC',
+        color: COLORS.info,
         letterSpacing: 2,
     },
     vehicleInfo: {
         fontSize: 16,
-        color: '#333',
+        color: COLORS.textPrimary,
         marginTop: 4,
     },
     vehicleColor: {
         fontSize: 14,
-        color: '#666',
+        color: COLORS.textSecondary,
         marginTop: 4,
     },
     menuItem: {
@@ -306,23 +312,23 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingVertical: 14,
         borderBottomWidth: 1,
-        borderBottomColor: '#eee',
+        borderBottomColor: COLORS.border,
         gap: 12,
     },
     menuText: {
         flex: 1,
         fontSize: 16,
-        color: '#333',
+        color: COLORS.textPrimary,
     },
     menuBadge: {
-        backgroundColor: '#E0F2FE',
+        backgroundColor: '#E6F0FF',
         paddingHorizontal: 8,
         paddingVertical: 2,
-        borderRadius: 4,
+        borderRadius: RADIUS.sm,
     },
     menuBadgeText: {
         fontSize: 12,
-        color: '#0066CC',
+        color: COLORS.info,
     },
     logoutButton: {
         flexDirection: 'row',
@@ -332,19 +338,19 @@ const styles = StyleSheet.create({
         marginTop: 24,
         marginHorizontal: 16,
         paddingVertical: 16,
-        backgroundColor: '#FEE2E2',
-        borderRadius: 12,
+        backgroundColor: '#FFEBE6',
+        borderRadius: RADIUS.md,
     },
     logoutText: {
         fontSize: 16,
-        fontWeight: '600',
-        color: '#EF4444',
+        fontWeight: '700',
+        color: COLORS.danger,
     },
     version: {
         textAlign: 'center',
         fontSize: 12,
-        color: '#aaa',
+        color: COLORS.textMuted,
         marginTop: 24,
-        marginBottom: 32,
+        marginBottom: 40,
     },
 });
