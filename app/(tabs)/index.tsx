@@ -12,10 +12,12 @@ import { COLORS, FONT, SPACING, RADIUS, SHADOW } from '../../constants/theme';
 import { MapaDriver, MapaDriverRef } from '@/components/MapaDriver';
 import { HomeBottomSheet } from '@/components/HomeBottomSheet';
 import { ChatScreen } from '@/components/ChatScreen';
+import { usePushNotifications } from '@/hooks/usePushNotifications';
 
 export default function HomeScreen() {
     const router = useRouter();
     const { conductor } = useAuthStore();
+    usePushNotifications(conductor?.id);
     const {
         isTracking, iniciarTurno, finalizarTurno,
         verificarTurnoPeristido, isConnected, currentLocation,
