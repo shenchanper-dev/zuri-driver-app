@@ -6,18 +6,17 @@
 import { create } from 'zustand';
 import { Platform } from 'react-native';
 import * as Location from 'expo-location';
-import * as TaskManager from 'expo-task-manager';
 import * as Battery from 'expo-battery';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { socket } from '@/services/socket';
 import { useAuthStore } from '@/stores/auth';
+import {
+    startBackgroundLocation,
+    stopBackgroundLocation,
+    isBackgroundLocationActive,
+} from '@/services/backgroundLocation';
 
-// Background task name
-const LOCATION_TASK_NAME = 'ZURI_BACKGROUND_LOCATION';
-
-// Clave AsyncStorage para persistir estado del turno y conductorId
 const TURNO_ACTIVO_KEY = 'zuri_turno_activo';
-const CONDUCTOR_ID_KEY = 'zuri_conductor_id';
 
 // ============================================================================
 // Offline GPS queue — persisted in AsyncStorage (survives app restarts)
@@ -219,28 +218,13 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
                 );
             }
 
-            // ZURI-FIX 2026-03-31: startLocationUpdatesAsync no existe en web (ExpoLocation.web.js no lo implementa)
             if (Platform.OS !== 'web' && backgroundStatus === 'granted') {
-                // Detener tarea previa si estaba corriendo (evita duplicados)
-                const yaActiva = await Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => false);
-                if (yaActiva) {
-                    await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME).catch(() => { });
+                const conductorId = useAuthStore.getState().conductor?.id;
+                if (conductorId) {
+                    await startBackgroundLocation(conductorId).catch(e =>
+                        console.error('[Location] startBackgroundLocation error:', e)
+                    );
                 }
-
-                await Location.startLocationUpdatesAsync(LOCATION_TASK_NAME, {
-                    accuracy: Location.Accuracy.Balanced,
-                    distanceInterval: 20,       // cada 20 metros
-                    timeInterval: 15000,        // o cada 15 segundos
-                    deferredUpdatesInterval: 0,
-                    showsBackgroundLocationIndicator: true,
-                    pausesUpdatesAutomatically: false,
-                    activityType: Location.ActivityType.AutomotiveNavigation,
-                    foregroundService: {
-                        notificationTitle: '🚗 ZURI — Turno Activo',
-                        notificationBody: 'GPS activo · Tu posición se está compartiendo',
-                        notificationColor: '#667eea',
-                    },
-                });
             }
 
             // ZURI-FIX 2026-04-03: Battery API puede lanzar excepción en navegadores
@@ -272,14 +256,9 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
     // ========================================
     stopTracking: async () => {
         try {
-            // ZURI-FIX 2026-04-03: TaskManager.isTaskRegisteredAsync lanza
-            // UnavailabilityError en web (web shim no lo implementa)
-            if (Platform.OS !== 'web') {
-                const hasStarted = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
-                if (hasStarted) {
-                    await Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-                }
-            } else {
+            await stopBackgroundLocation();
+
+            if (Platform.OS === 'web') {
                 // ZURI-FIX 2026-04-03: limpiar watchPosition en web
                 const watchId = (get() as any)._webWatchId;
                 if (watchId != null && typeof navigator !== 'undefined' && navigator.geolocation) {
@@ -351,12 +330,6 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
     // ========================================================================
     iniciarTurno: async () => {
         try {
-            // Persistir conductorId en AsyncStorage para que el background task lo lea
-            const conductorId = useAuthStore.getState().conductor?.id;
-            if (conductorId) {
-                await AsyncStorage.setItem(CONDUCTOR_ID_KEY, String(conductorId));
-            }
-
             const ok = await get().startTracking();
             if (ok) {
                 await AsyncStorage.setItem(TURNO_ACTIVO_KEY, 'true');
@@ -391,7 +364,7 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
 
             // En nativo verificar si la tarea background está registrada
             if (Platform.OS !== 'web') {
-                const tareaActiva = await TaskManager.isTaskRegisteredAsync(LOCATION_TASK_NAME);
+                const tareaActiva = await isBackgroundLocationActive();
                 if (tareaActiva) {
                     // La tarea ya corre en background: solo sincronizar estado en memoria
                     set({ isTracking: true });
@@ -414,77 +387,4 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
     },
 }));
 
-// ============================================================================
-// Background Task Definition (solo para móvil nativo)
-// ============================================================================
-
-// Solo definir el task en plataformas móviles nativas.
-// IMPORTANTE: defineTask DEBE estar en el top-level del módulo (fuera de funciones/componentes).
-if (Platform.OS !== 'web') {
-    TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }: any) => {
-        if (error) {
-            console.error('[GPS BG]', error.message);
-            return;
-        }
-        if (!data?.locations?.length) return;
-
-        const loc = data.locations[0];
-
-        try {
-            // Obtener conductorId persistido en AsyncStorage (único storage accesible en background)
-            const conductorIdStr = await AsyncStorage.getItem(CONDUCTOR_ID_KEY);
-            const conductorId = conductorIdStr ? parseInt(conductorIdStr, 10) : null;
-            if (!conductorId) {
-                console.warn('[GPS BG] Sin conductorId en AsyncStorage — descartando ubicación');
-                return;
-            }
-
-            const velocidadKmh = loc.coords.speed != null && loc.coords.speed >= 0
-                ? loc.coords.speed * 3.6
-                : null;
-
-            // Intentar WebSocket si está disponible
-            if (socket.isConnected) {
-                socket.emit('driver:location:update', {
-                    conductorId,
-                    latitude: loc.coords.latitude,
-                    longitude: loc.coords.longitude,
-                    heading: loc.coords.heading,
-                    speed: velocidadKmh,
-                    accuracy: loc.coords.accuracy,
-                });
-            }
-
-            // Siempre hacer fallback HTTP para garantizar persistencia en BD
-            const apiBase = process.env.EXPO_PUBLIC_API_URL || 'https://admin.zuri.pe/api';
-            const response = await fetch(`${apiBase}/conductores/gps-tracking`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    conductorId,
-                    latitud: loc.coords.latitude,
-                    longitud: loc.coords.longitude,
-                    precision: loc.coords.accuracy,
-                    velocidad: velocidadKmh,
-                    rumbo: loc.coords.heading,
-                }),
-            });
-
-            if (!response.ok) {
-                console.error('[GPS BG] HTTP update failed:', response.status);
-                // Queue for later flush
-                await enqueueLocation(conductorId, {
-                    latitude: loc.coords.latitude,
-                    longitude: loc.coords.longitude,
-                    heading: loc.coords.heading,
-                    speed: velocidadKmh,
-                    accuracy: loc.coords.accuracy,
-                });
-            }
-        } catch (err) {
-            // Unexpected error (e.g. AsyncStorage failure) — log only.
-            // Normal HTTP failures are already queued inside the try block above.
-            console.error('[GPS BG] Error enviando ubicación:', err);
-        }
-    });
-}
+// Background task is defined in services/backgroundLocation.ts
