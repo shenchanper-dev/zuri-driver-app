@@ -5,9 +5,11 @@
 import { Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useAuthStore } from '@/stores/auth';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function TabsLayout() {
     const { conductor } = useAuthStore();
+    const insets = useSafeAreaInsets();
 
     return (
         <Tabs
@@ -18,8 +20,8 @@ export default function TabsLayout() {
                     backgroundColor: '#FFFFFF',
                     borderTopColor: '#E5E7EB',
                     borderTopWidth: 1,
-                    height: 64,
-                    paddingBottom: 8,
+                    height: 64 + insets.bottom,
+                    paddingBottom: 8 + insets.bottom,
                     paddingTop: 4,
                 },
                 tabBarLabelStyle: {
