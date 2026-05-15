@@ -3,6 +3,7 @@
 import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
 import { Platform, View, StyleSheet } from 'react-native';
 import { WebView } from 'react-native-webview';
+import { MAP_HTML } from '@/constants/mapHtml';
 
 interface MapaDriverProps {
     lat: number;
@@ -13,8 +14,6 @@ interface MapaDriverProps {
 export interface MapaDriverRef {
     recenter: () => void;
 }
-
-const MAP_URL = 'https://app.zuri.pe/map.html';
 
 /**
  * MapaDriver — Leaflet map.
@@ -102,7 +101,7 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
                 <View style={st.nativeContainer}>
                     <WebView
                         ref={webViewRef}
-                        source={{ uri: MAP_URL }}
+                        source={{ html: MAP_HTML }}
                         style={st.webview}
                         originWhitelist={['*']}
                         javaScriptEnabled
