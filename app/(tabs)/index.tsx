@@ -117,7 +117,18 @@ export default function HomeScreen() {
     // ── Mount: auto-resume turno, connect socket, load counters ──────────────
     useEffect(() => {
         verificarTurnoPeristido().then(reanudado => {
-            if (reanudado) console.log('[Home] Turno reanudado automáticamente');
+            if (reanudado) {
+                console.log('[Home] Turno reanudado automáticamente');
+            } else {
+                iniciarTurno().then(ok => {
+                    if (ok) {
+                        console.log('[Home] GPS auto-iniciado al montar');
+                        socket.connect().then(connected => {
+                            if (connected) useLocationStore.getState().setConnected(true);
+                        });
+                    }
+                });
+            }
         });
 
         if (conductor?.id) {

@@ -366,9 +366,11 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
             if (Platform.OS !== 'web') {
                 const tareaActiva = await isBackgroundLocationActive();
                 if (tareaActiva) {
-                    // La tarea ya corre en background: solo sincronizar estado en memoria
+                    // La tarea background sigue corriendo pero NO actualiza el store —
+                    // arrancar watcher foreground para refrescar currentLocation y el mapa.
                     set({ isTracking: true });
-                    console.log('[Location] Turno reanudado — tarea background activa');
+                    get().startTracking().catch(() => {});
+                    console.log('[Location] Turno reanudado — tarea background activa + watcher foreground re-armado');
                     return true;
                 }
                 // La tarea no está activa aunque haya flag → rearrancar GPS completo
