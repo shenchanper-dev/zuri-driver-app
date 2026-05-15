@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
-import { Platform, View, Text, StyleSheet } from 'react-native';
+import { Platform, View, StyleSheet } from 'react-native';
+import { WebView } from 'react-native-webview';
 
 interface MapaDriverProps {
     lat: number;
@@ -13,37 +14,43 @@ export interface MapaDriverRef {
     recenter: () => void;
 }
 
+const MAP_URL = 'https://app.zuri.pe/map.html';
+
 /**
- * MapaDriver — Iframe-based Leaflet map.
+ * MapaDriver — Leaflet map.
  *
- * El mapa vive en /map.html, un archivo HTML estático servido por Expo
- * desde public/. Esto lo aísla completamente del runtime de React Native
- * Web, evitando los bugs de layout documentados (RNW#940).
+ * Web:    iframe → /map.html (servido por Expo desde public/).
+ * Native: WebView → MAP_URL  (mismo HTML hosteado en producción).
  *
- * Comunicación con el iframe:
- *   parent → iframe: iframe.contentWindow.postMessage({type, ...})
- *   iframe → parent: window.parent.postMessage({type, ...})
+ * Comunicación con el documento del mapa:
+ *   parent → map: en web vía `iframe.contentWindow.postMessage`;
+ *                en native vía `WebView.injectJavaScript("window.postMessage(...)")`.
+ *   map → parent: en web vía `window.parent.postMessage`;
+ *                en native vía `window.ReactNativeWebView.postMessage`.
  *
  * Tipos de mensajes:
  *   updateLocation { lat, lng, recenter?, zoom? }
  *   recenter       { lat, lng, zoom? }
- *   invalidate     {}                    -- forzar redimensión
- *   mapReady       {}                    -- iframe → parent al cargar
+ *   invalidate     {}
+ *   mapReady       {}   (map → parent al cargar)
  */
 export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
     ({ lat, lng, zoom = 16 }, ref) => {
         const iframeRef = useRef<HTMLIFrameElement | null>(null);
+        const webViewRef = useRef<WebView | null>(null);
         const isReadyRef = useRef(false);
         const pendingRef = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
 
         const post = (msg: any) => {
-            if (Platform.OS !== 'web') return;
-            const win = iframeRef.current?.contentWindow;
-            if (!win) return;
-            try {
-                win.postMessage(msg, '*');
-            } catch {
-                /* ignore */
+            if (Platform.OS === 'web') {
+                const win = iframeRef.current?.contentWindow;
+                if (!win) return;
+                try { win.postMessage(msg, '*'); } catch { /* ignore */ }
+            } else {
+                const wv = webViewRef.current;
+                if (!wv) return;
+                const js = `window.postMessage(${JSON.stringify(msg)}, '*'); true;`;
+                try { wv.injectJavaScript(js); } catch { /* ignore */ }
             }
         };
 
@@ -54,7 +61,7 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
             },
         }));
 
-        // ── Listen para mapReady desde el iframe ─────────────────────
+        // ── Web: listen mapReady from iframe via window message ──────
         useEffect(() => {
             if (Platform.OS !== 'web') return;
 
@@ -79,9 +86,8 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
             return () => window.removeEventListener('message', onMessage);
         }, []);
 
-        // ── Push de coordenadas al iframe cada vez que cambian ───────
+        // ── Push coords whenever they change ─────────────────────────
         useEffect(() => {
-            if (Platform.OS !== 'web') return;
             if (!lat || !lng) return;
             if (!isReadyRef.current) {
                 pendingRef.current = { lat, lng, zoom };
@@ -90,18 +96,41 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
             post({ type: 'updateLocation', lat, lng });
         }, [lat, lng, zoom]);
 
-        // ── Native: fondo con coordenadas GPS ────────────────────────
+        // ── Native: WebView con mapa Leaflet ─────────────────────────
         if (Platform.OS !== 'web') {
-            const hasCoords = lat !== -12.1462 || lng !== -76.9954;
             return (
-                <View style={st.placeholder}>
-                    <Text style={st.placeholderIcon}>📍</Text>
-                    <Text style={st.placeholderLabel}>GPS Activo</Text>
-                    {hasCoords && (
-                        <Text style={st.placeholderCoords}>
-                            {lat.toFixed(5)}, {lng.toFixed(5)}
-                        </Text>
-                    )}
+                <View style={st.nativeContainer}>
+                    <WebView
+                        ref={webViewRef}
+                        source={{ uri: MAP_URL }}
+                        style={st.webview}
+                        originWhitelist={['*']}
+                        javaScriptEnabled
+                        domStorageEnabled
+                        geolocationEnabled
+                        scalesPageToFit
+                        startInLoadingState={false}
+                        androidLayerType="hardware"
+                        setSupportMultipleWindows={false}
+                        onMessage={(event) => {
+                            try {
+                                const msg = JSON.parse(event.nativeEvent.data || '{}');
+                                if (msg.type === 'mapReady') {
+                                    isReadyRef.current = true;
+                                    if (pendingRef.current) {
+                                        post({
+                                            type: 'updateLocation',
+                                            lat: pendingRef.current.lat,
+                                            lng: pendingRef.current.lng,
+                                            zoom: pendingRef.current.zoom,
+                                            recenter: true,
+                                        });
+                                        pendingRef.current = null;
+                                    }
+                                }
+                            } catch { /* ignore */ }
+                        }}
+                    />
                 </View>
             );
         }
@@ -133,27 +162,12 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
 MapaDriver.displayName = 'MapaDriver';
 
 const st = StyleSheet.create({
-    placeholder: {
+    nativeContainer: {
         flex: 1,
-        backgroundColor: '#0F172A',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 6,
+        backgroundColor: '#d6d6d6',
     },
-    placeholderIcon: {
-        fontSize: 40,
-        marginBottom: 4,
-    },
-    placeholderLabel: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#94A3B8',
-        letterSpacing: 1,
-        textTransform: 'uppercase',
-    },
-    placeholderCoords: {
-        fontSize: 12,
-        color: '#475569',
-        fontVariant: ['tabular-nums'],
+    webview: {
+        flex: 1,
+        backgroundColor: '#d6d6d6',
     },
 });

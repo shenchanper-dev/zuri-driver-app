@@ -176,9 +176,14 @@
                 }
             });
 
-            // ── Notificar al parent que el mapa está listo ─────────────
+            // ── Notificar que el mapa está listo (web parent + RN WebView) ─
             try {
                 window.parent.postMessage({ type: 'mapReady' }, '*');
+            } catch (e) { /* ignore */ }
+            try {
+                if (window.ReactNativeWebView) {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'mapReady' }));
+                }
             } catch (e) { /* ignore */ }
         })();
     </script>
