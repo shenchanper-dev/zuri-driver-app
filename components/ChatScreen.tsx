@@ -6,6 +6,7 @@ import {
     KeyboardAvoidingView, Platform, StyleSheet, ActivityIndicator,
     Keyboard,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, FONT, SPACING, RADIUS, SHADOW } from '../constants/theme';
 import { chatSocket, MensajeChat } from '../services/chatSocket';
 import { useTextToSpeech } from '../hooks/useTextToSpeech';
@@ -19,6 +20,7 @@ interface ChatScreenProps {
 }
 
 export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }: ChatScreenProps) {
+    const insets = useSafeAreaInsets();
     const [mensajes, setMensajes]               = useState<MensajeChat[]>([]);
     const [input, setInput]                     = useState('');
     const [conversacionId, setConversacionId]   = useState<number | null>(null);
@@ -164,7 +166,8 @@ export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }
     return (
         <KeyboardAvoidingView
             style={s.container}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            behavior="padding"
+            keyboardVerticalOffset={Platform.OS === 'android' ? 0 : 0}
         >
             {/* Header */}
             <View style={s.header}>
@@ -232,7 +235,7 @@ export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }
             )}
 
             {/* Input */}
-            <View style={s.inputBar}>
+            <View style={[s.inputBar, { paddingBottom: (Platform.OS === 'web' ? SPACING[3] : SPACING[5]) + insets.bottom }]}>
                 <TextInput
                     style={s.input}
                     value={input}
@@ -465,8 +468,7 @@ const s = StyleSheet.create({
         alignItems: 'flex-end',
         gap: SPACING[2],
         paddingHorizontal: SPACING[3],
-        paddingVertical: SPACING[2],
-        paddingBottom: Platform.OS === 'web' ? SPACING[3] : SPACING[5],
+        paddingTop: SPACING[2],
         backgroundColor: COLORS.card,
         borderTopWidth: 1,
         borderTopColor: COLORS.border,
