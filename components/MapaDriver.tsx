@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useImperativeHandle, forwardRef } from 'react';
-import { Platform, View, StyleSheet } from 'react-native';
+import { Platform, View, Text, StyleSheet } from 'react-native';
 
 interface MapaDriverProps {
     lat: number;
@@ -90,9 +90,20 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
             post({ type: 'updateLocation', lat, lng });
         }, [lat, lng, zoom]);
 
-        // ── Native (APK futuro): placeholder ─────────────────────────
+        // ── Native: fondo con coordenadas GPS ────────────────────────
         if (Platform.OS !== 'web') {
-            return <View style={st.placeholder} />;
+            const hasCoords = lat !== -12.1462 || lng !== -76.9954;
+            return (
+                <View style={st.placeholder}>
+                    <Text style={st.placeholderIcon}>📍</Text>
+                    <Text style={st.placeholderLabel}>GPS Activo</Text>
+                    {hasCoords && (
+                        <Text style={st.placeholderCoords}>
+                            {lat.toFixed(5)}, {lng.toFixed(5)}
+                        </Text>
+                    )}
+                </View>
+            );
         }
 
         // ── Web: iframe full-screen vía position:fixed ───────────────
@@ -124,6 +135,25 @@ MapaDriver.displayName = 'MapaDriver';
 const st = StyleSheet.create({
     placeholder: {
         flex: 1,
-        backgroundColor: '#1F2937',
+        backgroundColor: '#0F172A',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+    },
+    placeholderIcon: {
+        fontSize: 40,
+        marginBottom: 4,
+    },
+    placeholderLabel: {
+        fontSize: 14,
+        fontWeight: '600',
+        color: '#94A3B8',
+        letterSpacing: 1,
+        textTransform: 'uppercase',
+    },
+    placeholderCoords: {
+        fontSize: 12,
+        color: '#475569',
+        fontVariant: ['tabular-nums'],
     },
 });
