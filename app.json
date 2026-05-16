@@ -51,7 +51,8 @@
         "android.permission.FOREGROUND_SERVICE",
         "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.USE_BIOMETRIC",
-        "android.permission.USE_FINGERPRINT"
+        "android.permission.USE_FINGERPRINT",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "plugins": [
@@ -92,6 +93,13 @@
           "color": "#00875A",
           "defaultChannel": "servicios-urgentes",
           "sounds": []
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "ZURI necesita el micrófono para reconocimiento de voz.",
+          "speechRecognitionPermission": "ZURI usa reconocimiento de voz para ingresar texto manos libres."
         }
       ],
       "expo-asset",
