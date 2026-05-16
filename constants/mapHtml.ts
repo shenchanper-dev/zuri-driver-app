@@ -30,6 +30,11 @@ export const MAP_HTML = `<!DOCTYPE html>
         .leaflet-control-attribution { display: none !important; }
 
         /* ── Driver marker ─────────────────────────────────────────── */
+        .zuri-driver-icon {
+            background: none !important;
+            border: none !important;
+            overflow: visible !important;
+        }
         .driver-marker {
             position: relative;
             width: 48px;
@@ -61,7 +66,6 @@ export const MAP_HTML = `<!DOCTYPE html>
             display: flex;
             align-items: center;
             justify-content: center;
-            filter: drop-shadow(0 4px 8px rgba(0,0,0,0.4));
         }
         /* Vehicle type badge — top-right of the marker */
         .driver-marker .badge {
@@ -128,7 +132,7 @@ export const MAP_HTML = `<!DOCTYPE html>
 
             var driverIcon = L.divIcon({
                 html: '<div class="driver-marker"><div class="pulse"></div><div class="core">' + carSVG + '</div><div class="badge"></div></div>',
-                className: '',
+                className: 'zuri-driver-icon',
                 iconSize: [48, 64],
                 iconAnchor: [24, 56],
             });
