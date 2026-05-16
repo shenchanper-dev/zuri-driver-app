@@ -162,6 +162,17 @@ export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }
         }
     }, [input, conectado, servicioId]);
 
+    const handleLimpiarChat = () => {
+        Alert.alert(
+            '¿Limpiar conversación?',
+            'Se borrará el historial visible en tu pantalla. El despacho no verá ningún cambio.',
+            [
+                { text: 'Cancelar', style: 'cancel' },
+                { text: 'Limpiar', style: 'destructive', onPress: () => setMensajes([]) },
+            ]
+        );
+    };
+
     // ── Render ────────────────────────────────────────────────────
     return (
         <KeyboardAvoidingView
@@ -176,7 +187,7 @@ export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }
                     onPress={onClose}
                     hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                 >
-                    <Text style={s.headerBackTx}>‹</Text>
+                    <Text style={[s.headerBackTx, { fontSize: 28 }]}>✕</Text>
                 </TouchableOpacity>
                 <View style={s.headerCenter}>
                     <Text style={s.headerTitle}>Despacho ZURI</Text>
@@ -187,19 +198,26 @@ export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }
                         </Text>
                     </View>
                 </View>
-                {tts.isSupported ? (
+                <View style={s.headerRightGroup}>
                     <TouchableOpacity
-                        style={s.headerRight}
-                        onPress={tts.toggle}
+                        style={s.headerIconBtn}
+                        onPress={handleLimpiarChat}
                         hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
                     >
-                        <Text style={[s.headerBackTx, !tts.enabled && { opacity: 0.4 }]}>
-                            {tts.isSpeaking ? '🔊' : tts.enabled ? '🔉' : '🔇'}
-                        </Text>
+                        <Text style={s.headerIconTx}>🗑️</Text>
                     </TouchableOpacity>
-                ) : (
-                    <View style={s.headerRight} />
-                )}
+                    {tts.isSupported ? (
+                        <TouchableOpacity
+                            style={s.headerIconBtn}
+                            onPress={tts.toggle}
+                            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+                        >
+                            <Text style={[s.headerIconTx, !tts.enabled && { opacity: 0.4 }]}>
+                                {tts.isSpeaking ? '🔊' : tts.enabled ? '🔉' : '🔇'}
+                            </Text>
+                        </TouchableOpacity>
+                    ) : null}
+                </View>
             </View>
 
             {/* Mensajes */}
@@ -356,6 +374,21 @@ const s = StyleSheet.create({
         fontSize: FONT.sizes.xs,
     },
     headerRight: { width: 40 },
+    headerRightGroup: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
+    headerIconBtn: {
+        width: 36,
+        height: 36,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    headerIconTx: {
+        color: COLORS.textOnDark,
+        fontSize: 20,
+    },
 
     // Lista
     listContent: {
