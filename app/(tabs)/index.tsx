@@ -235,6 +235,7 @@ export default function HomeScreen() {
                             || 'Conductor'
                         }
                         onClose={() => setChatOpen(false)}
+                        zuriAiHabilitado={conductor?.zuriAiHabilitado ?? true}
                     />
                 )}
             </Modal>

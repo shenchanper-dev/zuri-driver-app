@@ -18,9 +18,10 @@ interface ChatScreenProps {
     conductorId: number;
     conductorNombre: string;
     onClose: () => void;
+    zuriAiHabilitado?: boolean;
 }
 
-export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }: ChatScreenProps) {
+export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose, zuriAiHabilitado = true }: ChatScreenProps) {
     const insets = useSafeAreaInsets();
     const [mensajes, setMensajes]               = useState<MensajeChat[]>([]);
     const [input, setInput]                     = useState('');
@@ -223,7 +224,7 @@ export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }
                     >
                         <Text style={s.headerIconTx}>🗑️</Text>
                     </TouchableOpacity>
-                    {tts.isSupported ? (
+                    {tts.isSupported && zuriAiHabilitado ? (
                         <TouchableOpacity
                             style={s.headerIconBtn}
                             onPress={tts.toggle}
@@ -284,7 +285,7 @@ export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }
                     onSubmitEditing={handleSend}
                     blurOnSubmit={false}
                 />
-                {stt.isSupported && (
+                {stt.isSupported && zuriAiHabilitado && (
                     <TouchableOpacity
                         style={[s.btnMic, stt.isListening && s.btnMicListening]}
                         onPress={() => (stt.isListening ? stt.stop() : stt.start())}

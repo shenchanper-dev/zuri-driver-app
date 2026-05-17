@@ -60,6 +60,7 @@ interface Conductor {
         version?: string;
         biometriaEnabled?: boolean;
     };
+    zuriAiHabilitado?: boolean;
     metricas?: {
         calificacion?: number;
         totalServicios?: number;
