@@ -6,6 +6,7 @@ import {
     KeyboardAvoidingView, Platform, StyleSheet, ActivityIndicator,
     Keyboard, Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { COLORS, FONT, SPACING, RADIUS, SHADOW } from '../constants/theme';
 import { chatSocket, MensajeChat } from '../services/chatSocket';
@@ -64,11 +65,20 @@ export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }
             }
         });
 
-        const onHistory = (data: { conversacionId: number; mensajes: MensajeChat[] }) => {
+        const onHistory = async (data: { conversacionId: number; mensajes: MensajeChat[] }) => {
             if (cancelled) return;
             setConversacionId(data.conversacionId);
-            setMensajes(data.mensajes);
+            try {
+                const clearedAt = await AsyncStorage.getItem(`chat_cleared_at:${servicioId}`);
+                const filtered = clearedAt
+                    ? data.mensajes.filter(m => new Date(m.enviado_en) > new Date(clearedAt))
+                    : data.mensajes;
+                setMensajes(filtered);
+            } catch {
+                setMensajes(data.mensajes);
+            }
             setCargando(false);
+            // markRead uses full array — admin read receipts unaffected by local clear
             const ultimo = [...data.mensajes].reverse().find(m => m.autor_tipo === 'ADMIN');
             if (ultimo) chatSocket.markRead(data.conversacionId, ultimo.id);
         };
@@ -168,7 +178,14 @@ export function ChatScreen({ servicioId, conductorId, conductorNombre, onClose }
             'Se borrará el historial visible en tu pantalla. El despacho no verá ningún cambio.',
             [
                 { text: 'Cancelar', style: 'cancel' },
-                { text: 'Limpiar', style: 'destructive', onPress: () => setMensajes([]) },
+                {
+                    text: 'Limpiar',
+                    style: 'destructive',
+                    onPress: () => {
+                        setMensajes([]);
+                        AsyncStorage.setItem(`chat_cleared_at:${servicioId}`, new Date().toISOString());
+                    },
+                },
             ]
         );
     };
