@@ -170,6 +170,36 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
                 }
             }
 
+            // ZURI-FIX 2026-05-20: obtener posición inmediata para mostrar auto al instante
+            try {
+                if (Platform.OS === "web" && typeof navigator !== "undefined" && navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        (pos) => {
+                            get().updateLocation({
+                                latitude: pos.coords.latitude,
+                                longitude: pos.coords.longitude,
+                                heading: pos.coords.heading ?? undefined,
+                                speed: pos.coords.speed ?? undefined,
+                                accuracy: pos.coords.accuracy ?? undefined,
+                                timestamp: new Date().toISOString(),
+                            });
+                        },
+                        () => {},
+                        { enableHighAccuracy: false, timeout: 5000 }
+                    );
+                } else {
+                    const quickPos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+                    get().updateLocation({
+                        latitude: quickPos.coords.latitude,
+                        longitude: quickPos.coords.longitude,
+                        heading: quickPos.coords.heading ?? undefined,
+                        speed: quickPos.coords.speed ?? undefined,
+                        accuracy: quickPos.coords.accuracy ?? undefined,
+                        timestamp: new Date(quickPos.timestamp).toISOString(),
+                    });
+                }
+            } catch (e) { console.warn("[Location] Quick position failed:", e); }
+
             // Start foreground tracking
             if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.geolocation) {
                 console.log('🌐 [Location] Using Web Geolocation API');
