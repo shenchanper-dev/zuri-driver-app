@@ -1,5 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { driverApi } from './api';
 
@@ -64,7 +65,9 @@ export async function registerForPushNotifications(): Promise<string | null> {
         }
 
         // Get push token
-        const token = await Notifications.getExpoPushTokenAsync();
+        const token = await Notifications.getExpoPushTokenAsync({
+            projectId: Constants.expoConfig?.extra?.eas?.projectId ?? '0eae9dfa-a897-445d-89b0-9cdb74ea905c',
+        });
         console.log('[zuri:notifications] Got push token:', token.data.substring(0, 40) + '...');
 
         // Send token to backend
