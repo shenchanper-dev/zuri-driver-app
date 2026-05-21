@@ -228,6 +228,7 @@ export default function ServicesScreen() {
                 visible={showModalAsignacion}
                 asignacion={queue.length > 0 ? queue[0] : null}
                 onAceptado={handleAceptado}
+                onClose={() => setShowModalAsignacion(false)}
             />
         </View>
     );

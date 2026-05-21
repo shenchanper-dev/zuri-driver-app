@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
-    Modal, View, Text, TouchableOpacity,
+    Modal, View, Text, TouchableOpacity, Platform,
     ActivityIndicator, Alert, StyleSheet,
     Animated, Vibration,
 } from 'react-native';
@@ -12,6 +12,7 @@ interface Props {
     visible: boolean;
     asignacion: AsignacionProgramacion | null;
     onAceptado: (asignacion: AsignacionProgramacion) => void;
+    onClose?: () => void;
 }
 
 function GridItem({ icon, label, value }: { icon: string; label: string; value: string }) {
@@ -23,7 +24,7 @@ function GridItem({ icon, label, value }: { icon: string; label: string; value: 
     );
 }
 
-export function ServicioModal({ visible, asignacion, onAceptado }: Props) {
+export function ServicioModal({ visible, asignacion, onAceptado, onClose }: Props) {
     const [loading, setLoading] = useState(false);
     const [realState, setRealState] = useState<'ASIGNADO' | 'ACEPTADO' | null>(null);
     const fadeAnim = useRef(new Animated.Value(0)).current;
@@ -116,31 +117,43 @@ export function ServicioModal({ visible, asignacion, onAceptado }: Props) {
             setLoading(false);
         }
     };
-
     const handleRechazar = () => {
-        Alert.prompt(
-            '¿Por qué rechazas el servicio?',
-            'Escribe el motivo del rechazo (requerido):',
-            async (motivo) => {
-                if (!motivo?.trim()) {
-                    Alert.alert('Motivo requerido', 'Por favor escribe un motivo antes de rechazar.');
-                    return;
-                }
-                try {
-                    setLoading(true);
-                    await driverApi.responderProgramacion(asignacion.id, 'RECHAZAR', motivo.trim());
-                    Vibration.cancel();
-                    onAceptado(asignacion);
-                } catch {
-                    Alert.alert('Error', 'No se pudo registrar el rechazo.');
-                } finally {
-                    setLoading(false);
-                }
-            },
-            'plain-text'
-        );
+        const doRechazar = async (motivo: string) => {
+            try {
+                setLoading(true);
+                await driverApi.responderProgramacion(asignacion.id, "RECHAZAR", motivo.trim());
+                Vibration.cancel();
+                onAceptado(asignacion);
+            } catch {
+                Alert.alert("Error", "No se pudo registrar el rechazo.");
+            } finally {
+                setLoading(false);
+            }
+        };
+        if (Platform.OS === "ios") {
+            Alert.prompt(
+                "¿Por qué rechazas el servicio?",
+                "Escribe el motivo del rechazo:",
+                async (motivo) => {
+                    if (!motivo?.trim()) {
+                        Alert.alert("Motivo requerido", "Escribe un motivo antes de rechazar.");
+                        return;
+                    }
+                    await doRechazar(motivo);
+                },
+                "plain-text"
+            );
+        } else {
+            Alert.alert(
+                "Rechazar servicio",
+                "¿Estás seguro de rechazar este servicio?",
+                [
+                    { text: "Cancelar", style: "cancel" },
+                    { text: "Rechazar", style: "destructive", onPress: () => doRechazar("Rechazado por conductor") },
+                ]
+            );
+        }
     };
-
     return (
         <Modal visible={visible} transparent animationType="none" statusBarTranslucent>
             <Animated.View style={[s.overlay, { opacity: fadeAnim }]}>
@@ -150,6 +163,11 @@ export function ServicioModal({ visible, asignacion, onAceptado }: Props) {
                     <View style={s.topRow}>
                         <View style={s.badge}>
                             <Text style={s.badgeText}>NUEVO SERVICIO</Text>
+                        {onClose && (
+                            <TouchableOpacity onPress={onClose} style={{ position: "absolute", top: -8, right: -8, width: 32, height: 32, borderRadius: 16, backgroundColor: "#f1f5f9", alignItems: "center", justifyContent: "center", zIndex: 10 }} activeOpacity={0.7}>
+                                <Text style={{ fontSize: 18, color: "#64748b", fontWeight: "700" }}>✕</Text>
+                            </TouchableOpacity>
+                        )}
                         </View>
                     </View>
 
