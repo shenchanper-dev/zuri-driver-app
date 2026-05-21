@@ -9,6 +9,7 @@ interface MapaDriverProps {
     lat: number;
     lng: number;
     zoom?: number;
+    heading?: number;
 }
 
 export interface MapaDriverRef {
@@ -34,11 +35,11 @@ export interface MapaDriverRef {
  *   mapReady       {}   (map → parent al cargar)
  */
 export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
-    ({ lat, lng, zoom = 16 }, ref) => {
+    ({ lat, lng, zoom = 16, heading }, ref) => {
         const iframeRef = useRef<HTMLIFrameElement | null>(null);
         const webViewRef = useRef<WebView | null>(null);
         const isReadyRef = useRef(false);
-        const pendingRef = useRef<{ lat: number; lng: number; zoom: number } | null>(null);
+        const pendingRef = useRef<{ lat: number; lng: number; zoom: number; heading?: number } | null>(null);
 
         const post = (msg: any) => {
             if (Platform.OS === 'web') {
@@ -71,7 +72,7 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
                     if (pendingRef.current) {
                         post({
                             type: 'updateLocation',
-                            lat: pendingRef.current.lat,
+                            lat: pendingRef.current.lat, heading: pendingRef.current.heading,
                             lng: pendingRef.current.lng,
                             zoom: pendingRef.current.zoom,
                             recenter: true,
@@ -89,11 +90,11 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
         useEffect(() => {
             if (!lat || !lng) return;
             if (!isReadyRef.current) {
-                pendingRef.current = { lat, lng, zoom };
+                pendingRef.current = { lat, lng, zoom, heading };
                 return;
             }
-            post({ type: 'updateLocation', lat, lng });
-        }, [lat, lng, zoom]);
+            post({ type: 'updateLocation', lat, lng, heading });
+        }, [lat, lng, zoom, heading]);
 
         // ── Native: WebView con mapa Leaflet ─────────────────────────
         if (Platform.OS !== 'web') {
@@ -119,7 +120,7 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
                                     if (pendingRef.current) {
                                         post({
                                             type: 'updateLocation',
-                                            lat: pendingRef.current.lat,
+                                            lat: pendingRef.current.lat, heading: pendingRef.current.heading,
                                             lng: pendingRef.current.lng,
                                             zoom: pendingRef.current.zoom,
                                             recenter: true,

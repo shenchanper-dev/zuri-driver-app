@@ -171,6 +171,10 @@ export const MAP_HTML = `<!DOCTYPE html>
                 if (msg.type === 'updateLocation' && typeof msg.lat === 'number' && typeof msg.lng === 'number') {
                     var ll = [msg.lat, msg.lng];
                     marker.setLatLng(ll);
+                    if (typeof msg.heading === "number" && !isNaN(msg.heading)) {
+                        var core = document.querySelector(".driver-marker .core");
+                        if (core) core.style.transform = "translateX(-50%) rotate(" + msg.heading + "deg)";
+                    }
                     if (msg.recenter) {
                         map.flyTo(ll, msg.zoom || DEFAULT_ZOOM, { duration: 0.8 });
                     } else {

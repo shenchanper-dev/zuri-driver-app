@@ -179,6 +179,7 @@ export default function HomeScreen() {
                 ref={mapRef}
                 lat={currentLocation?.latitude ?? -12.1462}
                 lng={currentLocation?.longitude ?? -76.9954}
+                heading={currentLocation?.heading}
             />
 
             {/* HEADER FLOTANTE */}
