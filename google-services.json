@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1037145367476",
+    "project_id": "zuri-nemt",
+    "storage_bucket": "zuri-nemt.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1037145367476:android:aebb0feddc82d7404248e1",
+        "android_client_info": {
+          "package_name": "pe.zuri.conductor"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD_IkxCNW0XTp-Oy1kaY0zxmz1ydVacP4A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

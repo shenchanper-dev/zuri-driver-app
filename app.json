@@ -32,6 +32,7 @@
         "backgroundColor": "#0066CC"
       },
       "package": "pe.zuri.conductor",
+      "googleServicesFile": "./google-services.json",
       "versionCode": 6,
       "permissions": [
         "ACCESS_FINE_LOCATION",
