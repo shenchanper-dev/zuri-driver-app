@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 /**
  * ZURI Driver App - Profile Screen
  */
@@ -171,7 +172,7 @@ export default function ProfileScreen() {
 
             {/* App Version */}
             <Text style={styles.version}>
-                ZURI Conductor v{conductor?.app?.version || '1.0.0'}
+                ZURI Conductor v{Constants.expoConfig?.version ?? '1.0.5'}
             </Text>
         </ScrollView>
     );
