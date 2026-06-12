@@ -106,9 +106,9 @@ export const ACCENT_COLOR: Record<string, string> = {
 
 // Labels y config de botones de avance
 export const AVANCE_CONFIG: Record<string, { label: string; accion: AccionProgresion; bg: string }> = {
-    ACEPTADO:      { label: '🚗  Iniciar viaje',       accion: 'EN_CAMINO',    bg: '#0B1F3A' },
-    EN_CAMINO:     { label: '📍  Llegué al origen',    accion: 'EN_ORIGEN',    bg: '#0B1F3A' },
-    EN_ORIGEN:     { label: '👨‍⚕️  Médico a bordo',   accion: 'EN_TRANSPORTE', bg: '#0B1F3A' },
-    EN_TRANSPORTE: { label: '🏥  Llegamos al destino', accion: 'EN_DESTINO',   bg: '#0B1F3A' },
-    EN_DESTINO:    { label: '✅  Completar servicio',  accion: 'COMPLETAR',    bg: '#00875A' },
+    ACEPTADO:      { label: '🚗  EN CAMINO',            accion: 'EN_CAMINO',    bg: '#0B1F3A' },
+    EN_CAMINO:     { label: '📍  LLEGADA',              accion: 'EN_ORIGEN',    bg: '#0B1F3A' },
+    EN_ORIGEN:     { label: '👨‍⚕️  PROFESIONAL ABORDO', accion: 'EN_TRANSPORTE', bg: '#0B1F3A' },
+    EN_TRANSPORTE: { label: '🏥  DEJANDO PROFESIONAL',  accion: 'EN_DESTINO',   bg: '#0B1F3A' },
+    EN_DESTINO:    { label: '✅  TERMINO',              accion: 'COMPLETAR',    bg: '#00875A' },
 };

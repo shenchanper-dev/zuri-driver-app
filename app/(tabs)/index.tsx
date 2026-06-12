@@ -207,8 +207,6 @@ export default function HomeScreen() {
             {/* BOTTOM SHEET FLOTANTE */}
             <HomeBottomSheet
                 isConnected={isOnline}
-                onToggleConnection={handleToggleStatus}
-                loadingConnection={isToggling}
                 stats={{
                     completados: 0,
                     activos: serviciosResumen.activos,

@@ -1,3 +1,4 @@
+import React, { useState } from 'react';
 import Constants from 'expo-constants';
 /**
  * ZURI Driver App - Profile Screen
@@ -11,18 +12,68 @@ import {
     TouchableOpacity,
     Image,
     Alert,
+    ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/auth';
 import { useLocationStore } from '@/stores/location';
+import { driverApi } from '@/services/api';
 import { socket } from '@/services/socket';
 import { COLORS, RADIUS, SHADOW } from '@/constants/theme';
 
 export default function ProfileScreen() {
     const router = useRouter();
     const { conductor, logout } = useAuthStore();
-    const { stopTracking } = useLocationStore();
+    const { stopTracking, isTracking, iniciarTurno, finalizarTurno } = useLocationStore();
+    const [isToggling, setIsToggling] = useState(false);
+
+    const handleToggleConnection = async () => {
+        if (isToggling) return;
+        if (isTracking) {
+            Alert.alert(
+                'Desconectarse',
+                '¿Salir del servicio? Dejarás de recibir nuevos servicios y se detendrá el GPS.',
+                [
+                    { text: 'Cancelar', style: 'cancel' },
+                    {
+                        text: 'Desconectarse',
+                        style: 'destructive',
+                        onPress: async () => {
+                            setIsToggling(true);
+                            try {
+                                await finalizarTurno();
+                                useLocationStore.getState().setConnected(false);
+                                socket.disconnect();
+                                await driverApi.updateProfile({ estadoServicio: 'DESCONECTADO' });
+                            } catch (e) {
+                                console.warn('[Profile] Error al desconectar:', e);
+                            } finally {
+                                setIsToggling(false);
+                            }
+                        },
+                    },
+                ]
+            );
+        } else {
+            setIsToggling(true);
+            try {
+                const gpsOk = await iniciarTurno();
+                if (!gpsOk) {
+                    Alert.alert('GPS no disponible', 'Verifica que el GPS esté activado y que la app tenga permisos de ubicación.');
+                    return;
+                }
+                await driverApi.updateProfile({ estadoServicio: 'DISPONIBLE' });
+                socket.connect().then(connected => {
+                    if (connected) useLocationStore.getState().setConnected(true);
+                });
+            } catch (e) {
+                console.warn('[Profile] Error al conectar:', e);
+            } finally {
+                setIsToggling(false);
+            }
+        }
+    };
 
     const handleLogout = () => {
         Alert.alert(
@@ -163,6 +214,25 @@ export default function ProfileScreen() {
                     <Ionicons name="chevron-forward" size={20} color="#ccc" />
                 </TouchableOpacity>
             </View>
+
+            {/* Conexión */}
+            <TouchableOpacity
+                style={[styles.connectionButton, isTracking ? styles.connectionButtonOnline : styles.connectionButtonOffline]}
+                onPress={handleToggleConnection}
+                disabled={isToggling}
+                activeOpacity={0.85}
+            >
+                {isToggling ? (
+                    <ActivityIndicator size="small" color={isTracking ? COLORS.danger : COLORS.success} />
+                ) : (
+                    <>
+                        <View style={[styles.connectionDot, isTracking ? styles.dotOnline : styles.dotOffline]} />
+                        <Text style={[styles.connectionText, isTracking ? styles.connectionTextOnline : styles.connectionTextOffline]}>
+                            {isTracking ? 'Desconectarse del servicio' : 'Conectarse al servicio'}
+                        </Text>
+                    </>
+                )}
+            </TouchableOpacity>
 
             {/* Logout */}
             <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -331,12 +401,44 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: COLORS.info,
     },
+    connectionButton: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 10,
+        marginTop: 24,
+        marginHorizontal: 16,
+        paddingVertical: 14,
+        borderRadius: RADIUS.md,
+        borderWidth: 1.5,
+    },
+    connectionButtonOnline: {
+        backgroundColor: '#FFF5F5',
+        borderColor: '#FCA5A5',
+    },
+    connectionButtonOffline: {
+        backgroundColor: '#F0FDF4',
+        borderColor: '#86EFAC',
+    },
+    connectionDot: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+    },
+    dotOnline: { backgroundColor: '#22C55E' },
+    dotOffline: { backgroundColor: '#9CA3AF' },
+    connectionText: {
+        fontSize: 15,
+        fontWeight: '600',
+    },
+    connectionTextOnline: { color: '#EF4444' },
+    connectionTextOffline: { color: '#16A34A' },
     logoutButton: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 8,
-        marginTop: 24,
+        marginTop: 12,
         marginHorizontal: 16,
         paddingVertical: 16,
         backgroundColor: '#FFEBE6',

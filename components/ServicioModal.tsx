@@ -244,7 +244,7 @@ export function ServicioModal({ visible, asignacion, onAceptado, onClose }: Prop
                         >
                             {loading
                                 ? <ActivityIndicator color={COLORS.textOnDark} size="small" />
-                                : <Text style={s.btnAceptarText}>ACEPTAR SERVICIO</Text>
+                                : <Text style={s.btnAceptarText}>ALERTA SERVICIO</Text>
                             }
                         </TouchableOpacity>
                     )}

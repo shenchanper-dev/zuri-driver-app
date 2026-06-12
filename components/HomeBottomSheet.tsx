@@ -4,7 +4,6 @@ import React, { useRef } from 'react';
 import {
     View, Text, StyleSheet, TouchableOpacity,
     Animated, PanResponder, Platform, Dimensions,
-    ActivityIndicator,
 } from 'react-native';
 import { COLORS, FONT, SPACING, RADIUS, SHADOW } from '../constants/theme';
 
@@ -14,8 +13,6 @@ const SHEET_FULL = Math.min(WINDOW_H * 0.75, 600);
 
 interface HomeBottomSheetProps {
     isConnected: boolean;
-    onToggleConnection: () => void;
-    loadingConnection?: boolean;
     stats: {
         completados: number;
         activos: number;
@@ -29,8 +26,6 @@ interface HomeBottomSheetProps {
 
 export function HomeBottomSheet({
     isConnected,
-    onToggleConnection,
-    loadingConnection = false,
     stats,
     hasServicioActivo = false,
     onOpenServicioActivo,
@@ -79,21 +74,6 @@ export function HomeBottomSheet({
                     </Text>
                 </View>
             </View>
-
-            {/* CTA button */}
-            <TouchableOpacity
-                style={[s.btnCta, isConnected && s.btnCtaSecondary, loadingConnection && s.btnCtaDisabled]}
-                onPress={onToggleConnection}
-                disabled={loadingConnection}
-                activeOpacity={0.85}
-            >
-                {loadingConnection
-                    ? <ActivityIndicator color={isConnected ? COLORS.textPrimary : COLORS.textOnDark} size="small" />
-                    : <Text style={[s.btnCtaTx, isConnected && s.btnCtaTxSecondary]}>
-                        {isConnected ? 'Desconectarse' : 'Conectarse'}
-                    </Text>
-                }
-            </TouchableOpacity>
 
             {/* Servicio activo strip */}
             {hasServicioActivo && (
