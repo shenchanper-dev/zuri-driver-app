@@ -49,18 +49,22 @@ class SocketService {
             const isProd = !__DEV__;
             const finalUrl = isProd ? 'https://app.zuri.pe' : SOCKET_URL;
 
-            // 🔧 FIX idempotente: si ya hay socket conectado con el mismo token, no recrear.
-            // Evita que llamados duplicados de connect() (doble useEffect mount) rompan
-            // la conexion activa con un ciclo disconnect/connect.
-            if (this.socket?.connected && (this.socket as any)?.auth?.token === token) {
-                console.log('🔌 [SocketService] Ya conectado con el mismo token, saltando reconexion');
-                return true;
-            }
-
-            // Si hay un socket conectado pero cambio el token, si desconectar para renovar
-            if (this.socket?.connected) {
-                console.log('🔌 [SocketService] Token cambio, disconnecting previous socket');
+            // 🔧 FIX cascada: garantizar UN SOLO socket vivo.
+            // connect() se llama desde 5 lugares (mount, focus, AppState, boton, etc).
+            // El guardia anterior solo miraba .connected, pero durante el handshake
+            // (~200-800ms) .connected es false y this.socket ya existe, permitiendo
+            // que se creen multiples io() en cascada (bug de N sockets simultaneos,
+            // confirmado en conductores 25 y 196: 5 sockets muriendo en el mismo segundo).
+            if (this.socket) {
+                const sameToken = (this.socket as any)?.auth?.token === token;
+                if (this.socket.connected && sameToken) {
+                    console.log('🔌 [SocketService] Ya conectado (mismo token), reutilizando');
+                    return true;
+                }
+                console.log('🔌 [SocketService] Limpiando socket previo antes de reconectar (estado:', this.socket.connected ? 'conectado' : 'handshake/desconectado', ')');
+                this.socket.removeAllListeners();
                 this.socket.disconnect();
+                this.socket = null;
             }
 
             console.log('🔌 [SocketService] Connecting to:', finalUrl);
