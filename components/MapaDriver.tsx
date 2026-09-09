@@ -14,6 +14,8 @@ interface MapaDriverProps {
 
 export interface MapaDriverRef {
     recenter: () => void;
+    addRoutePoint: (lat: number, lng: number) => void;
+    clearRoute: () => void;
 }
 
 /**
@@ -58,6 +60,12 @@ export const MapaDriver = forwardRef<MapaDriverRef, MapaDriverProps>(
             recenter: () => {
                 if (!lat || !lng) return;
                 post({ type: 'recenter', lat, lng, zoom });
+            },
+            addRoutePoint: (ptLat: number, ptLng: number) => {
+                post({ type: 'addRoutePoint', lat: ptLat, lng: ptLng });
+            },
+            clearRoute: () => {
+                post({ type: 'clearRoute' });
             },
         }));
 

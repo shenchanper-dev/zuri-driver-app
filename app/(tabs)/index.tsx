@@ -162,6 +162,19 @@ export default function HomeScreen() {
         };
     }, [conductor?.id]);
 
+    // ── Route tracking: add points to map polyline during active service ────
+    const prevServiceId = useRef<number | null>(null);
+
+    useEffect(() => {
+        if (servicioActivoId !== prevServiceId.current) {
+            mapRef.current?.clearRoute();
+            prevServiceId.current = servicioActivoId;
+        }
+        if (currentLocation && servicioActivoId) {
+            mapRef.current?.addRoutePoint(currentLocation.latitude, currentLocation.longitude);
+        }
+    }, [currentLocation, servicioActivoId]);
+
     // ── Derived display values ────────────────────────────────────────────────
     const nombreCorto = conductor?.nombres
         || conductor?.nombreCompleto?.split(' ')[0]

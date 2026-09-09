@@ -3,13 +3,52 @@
  * Handles authentication flow and theme setup
  */
 
-import { useEffect, useState, ErrorInfo, Component, ReactNode, useCallback } from 'react';
+import { useEffect, useState, ErrorInfo, Component, ReactNode, useCallback, useRef } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View, ActivityIndicator, StyleSheet, Text, TouchableOpacity, Platform } from 'react-native';
+import { View, ActivityIndicator, StyleSheet, Text, TouchableOpacity, Platform, AppState, AppStateStatus } from 'react-native';
 import { useAuthStore } from '@/stores/auth';
 import { Ionicons } from '@expo/vector-icons';
-import { setupNotificationChannel, setupNotificationListeners } from '@/services/notifications';
+import { setupNotificationChannel, setupNotificationListeners, setForegroundNotificationCallback, checkColdStartNotification } from '@/services/notifications';
+import { NuevoServicioPopup } from '@/components/NuevoServicioPopup';
+import notifee, { EventType } from '@notifee/react-native';
+import { socket } from '@/services/socket';
+
+// Unifica campos snake_case / camelCase entre WebSocket, Push y Notifee
+function normalizeServicioData(raw: any) {
+    if (!raw) return null;
+    return {
+        doctor: raw.doctor || raw.doctor_nombre || raw.profesional || 'Dr.',
+        horaInicio: raw.horaInicio || raw.hora_inicio || raw.hora || raw.h_inicio || '',
+        horaFin: raw.horaFin || raw.hora_fin || raw.h_termino || '',
+        turno: raw.turno || '',
+        cliente: raw.cliente || raw.cliente_nombre || '',
+        distrito: raw.distrito || raw.distrito_nombre || '',
+        fecha: raw.fecha || '',
+        serviceId: raw.serviceId || raw.detalle_id || raw.servicio_id || raw.id || null,
+    };
+}
+
+function popupDataFromRaw(raw: any) {
+    const n = normalizeServicioData(raw);
+    if (!n) return null;
+    return {
+        title: 'SERVICIO ASIGNADO',
+        body: [n.doctor, [n.fecha, n.horaInicio].filter(Boolean).join(' · '), n.distrito]
+            .filter(Boolean)
+            .join('\n'),
+        payload: {
+            serviceId: n.serviceId ? String(n.serviceId) : '',
+            fecha: n.fecha,
+            hora: n.horaInicio,
+            horaFin: n.horaFin,
+            turno: n.turno,
+            distrito: n.distrito,
+            cliente: n.cliente,
+            doctor: n.doctor,
+        },
+    };
+}
 
 // Error Boundary para capturar errores
 class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean, error: Error | null }> {
@@ -54,6 +93,11 @@ const errorStyles = StyleSheet.create({
     buttonText: { color: '#fff', fontWeight: '600', fontSize: 16 },
 });
 
+// Kept as alias so downstream call sites remain stable; delegates to normalizer
+function popupDataFromNotifeePayload(payload: Record<string, any>) {
+    return popupDataFromRaw(payload);
+}
+
 function RootLayoutContent() {
     const router = useRouter();
     const segments = useSegments();
@@ -61,6 +105,7 @@ function RootLayoutContent() {
     const [isLoading, setIsLoading] = useState(true);
     const [loadingMessage, setLoadingMessage] = useState('Iniciando...');
     const [initError, setInitError] = useState<string | null>(null);
+    const [popupData, setPopupData] = useState<{ title: string; body: string; payload: Record<string, any> } | null>(null);
 
     const initialize = useCallback(async () => {
         let isMounted = true;
@@ -132,17 +177,81 @@ function RootLayoutContent() {
         initialize();
     }, []);
 
-    // Setup notification channel (Android) + listeners
     useEffect(() => {
         const setup = async () => {
             try {
                 await setupNotificationChannel();
+                setForegroundNotificationCallback((data) => {
+                    setPopupData(data);
+                });
                 setupNotificationListeners();
+                // Check if app was opened from a notification tap (cold start from Expo push)
+                checkColdStartNotification();
             } catch (error) {
                 console.warn('[RootLayout] Error setting up notifications:', error);
             }
         };
         setup();
+        return () => { setForegroundNotificationCallback(null); };
+    }, []);
+
+    // WebSocket listener: show popup from socket events too (Bug C/E fix)
+    useEffect(() => {
+        const handleSocketAssigned = (data: any) => {
+            const p = popupDataFromRaw(data);
+            if (p) setPopupData(p);
+        };
+        socket.on('service:assigned', handleSocketAssigned);
+        return () => { socket.off('service:assigned', handleSocketAssigned); };
+    }, []);
+
+    // AppState listener: force socket reconnect when app returns from background
+    // (Android kills WebSocket when screen sleeps; HTTP bg-task keeps GPS alive)
+    const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+    useEffect(() => {
+        const handleAppStateChange = (next: AppStateStatus) => {
+            const prev = appStateRef.current;
+            appStateRef.current = next;
+            if ((prev === 'background' || prev === 'inactive') && next === 'active') {
+                try {
+                    const anySocket = socket as any;
+                    if (typeof anySocket?.ensureConnected === 'function') {
+                        anySocket.ensureConnected();
+                    } else if (typeof anySocket?.connect === 'function') {
+                        anySocket.connect();
+                    }
+                    console.log('[AppState] foreground -> forced socket reconnect');
+                } catch (err) {
+                    console.warn('[AppState] socket reconnect error:', err);
+                }
+            }
+        };
+        const sub = AppState.addEventListener('change', handleAppStateChange);
+        return () => sub.remove();
+    }, []);
+
+    // Handle Notifee full-screen notifications: app cold-started from a
+    // full-screen/press action, or tapped while already in foreground.
+    useEffect(() => {
+        if (Platform.OS !== 'android') return;
+
+        notifee.getInitialNotification().then((initial) => {
+            const payload = initial?.notification?.data as Record<string, any> | undefined;
+            if (payload) {
+                setPopupData(popupDataFromNotifeePayload(payload));
+            }
+        }).catch((err) => console.warn('[RootLayout] getInitialNotification error:', err));
+
+        const unsubscribe = notifee.onForegroundEvent(({ type, detail }) => {
+            if (type === EventType.PRESS) {
+                const payload = detail.notification?.data as Record<string, any> | undefined;
+                if (payload) {
+                    setPopupData(popupDataFromNotifeePayload(payload));
+                }
+            }
+        });
+
+        return () => unsubscribe();
     }, []);
 
     // Handle routing based on auth state
@@ -219,6 +328,25 @@ function RootLayoutContent() {
                 <Stack.Screen name="(auth)" options={{ headerShown: false }} />
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
             </Stack>
+            <NuevoServicioPopup
+                visible={!!popupData}
+                data={popupData ? {
+                    title: popupData.title,
+                    body: popupData.body,
+                    fecha: popupData.payload?.fecha,
+                    hora: popupData.payload?.hora,
+                    horaFin: popupData.payload?.horaFin,
+                    turno: popupData.payload?.turno,
+                    distrito: popupData.payload?.distrito,
+                    cliente: popupData.payload?.cliente,
+                    serviceId: popupData.payload?.serviceId,
+                } : null}
+                onVerServicio={() => {
+                    setPopupData(null);
+                    router.replace('/(tabs)/services');
+                }}
+                onClose={() => setPopupData(null)}
+            />
         </>
     );
 }

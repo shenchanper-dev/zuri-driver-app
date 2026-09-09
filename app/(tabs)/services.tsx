@@ -3,15 +3,18 @@ import {
     View, Text, StyleSheet,
     FlatList, TouchableOpacity,
     RefreshControl, ActivityIndicator,
-    Platform,
+    Platform, Modal,
 } from 'react-native';
 import { driverApi } from '@/services/api';
 import { ServicioModal } from '@/components/ServicioModal';
 import { ServicioActivoCard } from '@/components/ServicioActivoCard';
 import { ServicioPendienteCard } from '@/components/ServicioPendienteCard';
 import { ServicioHistorialCard } from '@/components/ServicioHistorialCard';
+import { ChatScreen } from '@/components/ChatScreen';
 import { useServicioSocket } from '@/hooks/useServicioSocket';
+import { useFocusEffect } from 'expo-router';
 import { useNagging } from '@/hooks/useNagging';
+import { useAuthStore } from '@/stores/auth';
 import type { Servicio, AsignacionProgramacion, TabType } from '@/types/servicios';
 import { ESTADOS_PENDIENTE, ESTADOS_ACTIVO, ESTADOS_HISTORIAL } from '@/types/servicios';
 import { COLORS, RADIUS, SHADOW } from '@/constants/theme';
@@ -29,10 +32,12 @@ const TABS: TabType[] = ['pendientes', 'activos', 'historial'];
 // ── Main screen ───────────────────────────────────────────────────────────────
 
 export default function ServicesScreen() {
+    const { conductor } = useAuthStore();
     const [services, setServices] = useState<Servicio[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
     const [activeTab, setActiveTab] = useState<TabType>('pendientes');
+    const [chatOpen, setChatOpen] = useState(false);
 
     // ZURI-FIX 2026-04-22: Queue-based system for multiple consecutive assignments
     // Fixes race condition where 2nd assignment overwrites 1st before ACEPTAR is pressed
@@ -61,6 +66,13 @@ export default function ServicesScreen() {
     useEffect(() => {
         loadServices();
     }, [loadServices]);
+
+    // Reload services when tab gains focus (Bug D fix)
+    useFocusEffect(
+        useCallback(() => {
+            loadServices();
+        }, [loadServices])
+    );
 
     // ── Socket events ─────────────────────────────────────────────────────────
     useServicioSocket({
@@ -118,7 +130,17 @@ export default function ServicesScreen() {
     const activos = services.filter(s => (ESTADOS_ACTIVO as readonly string[]).includes(s.estado));
     const historial = services.filter(s => (ESTADOS_HISTORIAL as readonly string[]).includes(s.estado));
 
-    const tabData: Record<TabType, Servicio[]> = { pendientes, activos, historial };
+    // Bug 3 fix: sort services by fecha+hora
+    const sortByFechaHora = (a: Servicio, b: Servicio, desc = false) => {
+        const fa = (a.fecha || '') + (a.hora_inicio || '');
+        const fb = (b.fecha || '') + (b.hora_inicio || '');
+        return desc ? fb.localeCompare(fa) : fa.localeCompare(fb);
+    };
+    const tabData: Record<TabType, Servicio[]> = {
+        pendientes: [...pendientes].sort((a, b) => sortByFechaHora(a, b)),
+        activos: [...activos].sort((a, b) => sortByFechaHora(a, b)),
+        historial: [...historial].sort((a, b) => sortByFechaHora(a, b, true)),
+    };
 
     // ── Render ────────────────────────────────────────────────────────────────
 
@@ -143,7 +165,7 @@ export default function ServicesScreen() {
             activos: {
                 icon: '🚗',
                 titulo: 'Sin servicios activos',
-                subtitulo: 'Acepta un servicio pendiente para comenzar',
+                subtitulo: 'Los servicios asignados apareceran aqui',
                 boton: { label: 'Ver pendientes', tab: 'pendientes' as TabType },
             },
             historial: {
@@ -230,6 +252,40 @@ export default function ServicesScreen() {
                 onAceptado={handleAceptado}
                 onClose={() => setShowModalAsignacion(false)}
             />
+
+            {(() => { console.log("[ZURI:FAB] activos:", activos.length, "conductor.id:", conductor?.id); return null; })()}
+            {/* Chat FAB — visible when there are active services */}
+            {activos.length > 0 && conductor?.id && (
+                <TouchableOpacity
+                    style={s.chatFab}
+                    onPress={() => setChatOpen(true)}
+                    activeOpacity={0.85}
+                >
+                    <Text style={s.chatFabIcon}>💬</Text>
+                </TouchableOpacity>
+            )}
+
+            {/* Chat Modal */}
+            <Modal
+                visible={chatOpen}
+                animationType="slide"
+                onRequestClose={() => setChatOpen(false)}
+                presentationStyle={Platform.OS === 'ios' ? 'pageSheet' : 'fullScreen'}
+            >
+                {chatOpen && activos.length > 0 && conductor?.id && (
+                    <ChatScreen
+                        servicioId={activos[0].id}
+                        conductorId={conductor.id}
+                        conductorNombre={
+                            conductor.nombres
+                            || conductor.nombreCompleto?.split(' ')[0]
+                            || 'Conductor'
+                        }
+                        onClose={() => setChatOpen(false)}
+                        zuriAiHabilitado={conductor?.zuriAiHabilitado ?? true}
+                    />
+                )}
+            </Modal>
         </View>
     );
 }
@@ -343,5 +399,24 @@ const s = StyleSheet.create({
         fontSize: 14,
         fontWeight: '600',
         color: COLORS.textPrimary,
+    },
+    chatFab: {
+        position: 'absolute',
+        bottom: 24,
+        right: 20,
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        backgroundColor: '#0EA5E9',
+        alignItems: 'center',
+        justifyContent: 'center',
+        elevation: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 3 },
+        shadowOpacity: 0.25,
+        shadowRadius: 4,
+    },
+    chatFabIcon: {
+        fontSize: 26,
     },
 });

@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import {
     setupNotificationChannel,
     registerForPushNotifications,
-    setupNotificationListeners,
+// setupNotificationListeners moved to _layout.tsx (avoid double registration)
 } from '@/services/notifications';
 
 export function usePushNotifications(conductorId: number | undefined) {
@@ -16,7 +16,7 @@ export function usePushNotifications(conductorId: number | undefined) {
         (async () => {
             await setupNotificationChannel();
             await registerForPushNotifications();
-            cleanup = setupNotificationListeners();
+            // Listeners registered in app/_layout.tsx to avoid double registration
         })();
 
         return () => {

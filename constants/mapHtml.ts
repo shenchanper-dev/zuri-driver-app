@@ -139,6 +139,16 @@ export const MAP_HTML = `<!DOCTYPE html>
 
             var marker = L.marker([DEFAULT_LAT, DEFAULT_LNG], { icon: driverIcon }).addTo(map);
 
+            // ── Route polyline ───────────────────────────────────────
+            var routePoints = [];
+            var routeLine = L.polyline([], {
+                color: '#0EA5E9',
+                weight: 4,
+                opacity: 0.8,
+                lineJoin: 'round',
+                lineCap: 'round',
+            }).addTo(map);
+
             // ── Vehicle type badge emojis ──────────────────────────────
             var VEHICLE_EMOJIS = {
                 'WHEELCHAIR': '♿',
@@ -186,6 +196,15 @@ export const MAP_HTML = `<!DOCTYPE html>
                     map.invalidateSize();
                 } else if (msg.type === 'updateVehicleType') {
                     updateBadge(msg.vehicleType);
+                } else if (msg.type === 'addRoutePoint' && typeof msg.lat === 'number' && typeof msg.lng === 'number') {
+                    routePoints.push([msg.lat, msg.lng]);
+                    routeLine.setLatLngs(routePoints);
+                } else if (msg.type === 'updateRoute' && Array.isArray(msg.points)) {
+                    routePoints = msg.points.map(function(p) { return [p.lat, p.lng]; });
+                    routeLine.setLatLngs(routePoints);
+                } else if (msg.type === 'clearRoute') {
+                    routePoints = [];
+                    routeLine.setLatLngs([]);
                 }
             });
 

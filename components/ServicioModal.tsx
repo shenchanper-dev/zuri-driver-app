@@ -145,7 +145,7 @@ export function ServicioModal({ visible, asignacion, onAceptado, onClose }: Prop
             );
         } else {
             Alert.alert(
-                "Rechazar servicio",
+                "Cerrar",
                 "¿Estás seguro de rechazar este servicio?",
                 [
                     { text: "Cancelar", style: "cancel" },
@@ -162,7 +162,7 @@ export function ServicioModal({ visible, asignacion, onAceptado, onClose }: Prop
                     {/* Badge row */}
                     <View style={s.topRow}>
                         <View style={s.badge}>
-                            <Text style={s.badgeText}>NUEVO SERVICIO</Text>
+                            <Text style={s.badgeText}>SERVICIO ASIGNADO</Text>
                         {onClose && (
                             <TouchableOpacity onPress={onClose} style={{ position: "absolute", top: -8, right: -8, width: 32, height: 32, borderRadius: 16, backgroundColor: "#f1f5f9", alignItems: "center", justifyContent: "center", zIndex: 10 }} activeOpacity={0.7}>
                                 <Text style={{ fontSize: 18, color: "#64748b", fontWeight: "700" }}>✕</Text>
@@ -238,13 +238,13 @@ export function ServicioModal({ visible, asignacion, onAceptado, onClose }: Prop
                     ) : (
                         <TouchableOpacity
                             style={[s.btnAceptar, loading && s.btnDisabled]}
-                            onPress={handleAceptar}
+                            onPress={() => { Vibration.cancel(); onAceptado(asignacion); }}
                             disabled={loading}
                             activeOpacity={0.85}
                         >
                             {loading
                                 ? <ActivityIndicator color={COLORS.textOnDark} size="small" />
-                                : <Text style={s.btnAceptarText}>ALERTA SERVICIO</Text>
+                                : <Text style={s.btnAceptarText}>VER SERVICIO</Text>
                             }
                         </TouchableOpacity>
                     )}
@@ -252,11 +252,11 @@ export function ServicioModal({ visible, asignacion, onAceptado, onClose }: Prop
                     {/* Reject link */}
                     <TouchableOpacity
                         style={s.btnRechazar}
-                        onPress={handleRechazar}
+                        onPress={onClose || (() => { Vibration.cancel(); onAceptado(asignacion); })}
                         disabled={loading}
                         activeOpacity={0.7}
                     >
-                        <Text style={s.btnRechazarText}>Rechazar servicio</Text>
+                        <Text style={s.btnRechazarText}>Cerrar</Text>
                     </TouchableOpacity>
 
                 </Animated.View>

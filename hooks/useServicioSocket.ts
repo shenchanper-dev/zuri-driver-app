@@ -7,6 +7,7 @@ interface Callbacks {
     onProgramacionAsignada: (asignacion: AsignacionProgramacion) => void;
     onServicioAsignado: (servicio: Partial<Servicio>) => void;
     onServicioActualizado: () => void;
+    onServicioCancelado?: (data: any) => void;
 }
 
 /**
@@ -48,9 +49,20 @@ export function useServicioSocket(callbacks: Callbacks) {
         socket.on('service:assigned', handleAssigned);
         socket.on('service:updated', handleUpdated);
 
+        const handleCancelled = (data: any) => {
+            console.log('[useServicioSocket] service:cancelled', data?.detalleId);
+            if (cbRef.current.onServicioCancelado) {
+                cbRef.current.onServicioCancelado(data);
+            } else {
+                cbRef.current.onServicioActualizado();
+            }
+        };
+        socket.on('service:cancelled', handleCancelled);
+
         return () => {
             socket.off('service:assigned', handleAssigned);
             socket.off('service:updated', handleUpdated);
+            socket.off('service:cancelled', handleCancelled);
         };
     }, []); // stable — no external deps
 }

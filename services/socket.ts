@@ -19,11 +19,25 @@ class SocketService {
     private currentConductorId: number | null = null;
     private pendingListeners: Array<{ event: string; callback: (data: any) => void }> = [];
     private connectionChangeCallbacks: Array<(connected: boolean) => void> = [];
+    private connectPromise: Promise<boolean> | null = null; // 🔧 evita conexiones concurrentes
 
     /**
      * Connect to WebSocket server
      */
     async connect(): Promise<boolean> {
+        // 🔧 FIX: si ya hay una conexion en progreso, reutilizar su promise
+        // (evita que llamados duplicados de connect() rompan el handshake en curso)
+        if (this.connectPromise) {
+            console.log('🔌 [SocketService] connect() ya en progreso, reutilizando promise');
+            return this.connectPromise;
+        }
+        this.connectPromise = this._doConnect().finally(() => {
+            this.connectPromise = null;
+        });
+        return this.connectPromise;
+    }
+
+    private async _doConnect(): Promise<boolean> {
         try {
             const token = await secureStorage.getItem(TOKEN_KEY);
 
@@ -35,13 +49,21 @@ class SocketService {
             const isProd = !__DEV__;
             const finalUrl = isProd ? 'https://app.zuri.pe' : SOCKET_URL;
 
-            console.log('🔌 [SocketService] Connecting to:', finalUrl);
+            // 🔧 FIX idempotente: si ya hay socket conectado con el mismo token, no recrear.
+            // Evita que llamados duplicados de connect() (doble useEffect mount) rompan
+            // la conexion activa con un ciclo disconnect/connect.
+            if (this.socket?.connected && (this.socket as any)?.auth?.token === token) {
+                console.log('🔌 [SocketService] Ya conectado con el mismo token, saltando reconexion');
+                return true;
+            }
 
-            // Disconnect existing connection
+            // Si hay un socket conectado pero cambio el token, si desconectar para renovar
             if (this.socket?.connected) {
-                console.log('🔌 [SocketService] Disconnecting previous socket');
+                console.log('🔌 [SocketService] Token cambio, disconnecting previous socket');
                 this.socket.disconnect();
             }
+
+            console.log('🔌 [SocketService] Connecting to:', finalUrl);
 
             this.socket = io(finalUrl, {
                 auth: { token },
@@ -49,7 +71,7 @@ class SocketService {
                 reconnection: true,
                 reconnectionAttempts: Infinity,
                 reconnectionDelay: 1000,
-                reconnectionDelayMax: 30000,
+                reconnectionDelayMax: 5000,
                 timeout: 10000,
                 path: '/socket.io/', // Con barra diagonal para coincidir con Nginx
             });
