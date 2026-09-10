@@ -4,6 +4,7 @@ import {
     Alert, StatusBar, Platform, Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import * as Location from 'expo-location';
 import { useAuthStore } from '@/stores/auth';
 import { useLocationStore } from '@/stores/location';
 import { driverApi } from '@/services/api';
@@ -28,6 +29,8 @@ export default function HomeScreen() {
     const [isToggling, setIsToggling]           = useState(false);
     const [serviciosResumen, setServiciosResumen] = useState({ pendientes: 0, activos: 0 });
     const [servicioActivoId, setServicioActivoId] = useState<number | null>(null);
+    // Banner GPS: en turno pero sin GPS (apagado o sin permiso). Modelo Uber "Waiting for GPS".
+    const [gpsWarning, setGpsWarning] = useState(false);
     const [chatOpen, setChatOpen]               = useState(false);
 
     // ── Load service counters ─────────────────────────────────────────────────
@@ -175,6 +178,26 @@ export default function HomeScreen() {
         }
     }, [currentLocation, servicioActivoId]);
 
+    // ── GPS watchdog: en turno pero sin GPS (apagado o permiso denegado) ────────
+    // Modelo Uber "Waiting for GPS": avisar pero permitir. Chequea al activarse el
+    // turno y cada 15s mientras dure, y al volver a foreground (via currentLocation).
+    useEffect(() => {
+        if (!isOnline) { setGpsWarning(false); return; }
+        let cancelled = false;
+        const checkGps = async () => {
+            try {
+                const enabled = await Location.hasServicesEnabledAsync();
+                const { status } = await Location.getForegroundPermissionsAsync();
+                if (!cancelled) setGpsWarning(!enabled || status !== 'granted');
+            } catch {
+                if (!cancelled) setGpsWarning(false);
+            }
+        };
+        checkGps();
+        const iv = setInterval(checkGps, 15000);
+        return () => { cancelled = true; clearInterval(iv); };
+    }, [isOnline, currentLocation]);
+
     // ── Derived display values ────────────────────────────────────────────────
     const nombreCorto = conductor?.nombres
         || conductor?.nombreCompleto?.split(' ')[0]
@@ -207,6 +230,29 @@ export default function HomeScreen() {
                     </View>
                 </View>
             </View>
+
+            {/* BANNER GPS: en turno pero sin GPS (apagado / sin permiso) */}
+            {gpsWarning && (
+                <TouchableOpacity
+                    style={s.gpsBanner}
+                    activeOpacity={0.85}
+                    onPress={async () => {
+                        const enabled = await Location.hasServicesEnabledAsync().catch(() => false);
+                        if (!enabled) {
+                            Alert.alert(
+                                'GPS desactivado',
+                                'Activa la ubicación (GPS) de tu teléfono para poder recibir servicios.'
+                            );
+                        } else {
+                            const { status } = await Location.requestForegroundPermissionsAsync();
+                            if (status === 'granted') setGpsWarning(false);
+                        }
+                    }}
+                >
+                    <Text style={s.gpsBannerIcon}>📡</Text>
+                    <Text style={s.gpsBannerTx}>GPS desactivado — actívalo para recibir servicios</Text>
+                </TouchableOpacity>
+            )}
 
             {/* FAB recentrar */}
             <TouchableOpacity
@@ -315,6 +361,23 @@ const s = StyleSheet.create({
         ...SHADOW.elevated,
     },
     fabIcon: { fontSize: 20 },
+    gpsBanner: {
+        position: 'absolute',
+        top: Platform.OS === 'web' ? 70 : 104,
+        left: SPACING[4],
+        right: SPACING[4],
+        backgroundColor: '#F59E0B',
+        borderRadius: RADIUS.md,
+        paddingVertical: 10,
+        paddingHorizontal: 14,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        zIndex: 20,
+        ...SHADOW.elevated,
+    },
+    gpsBannerIcon: { fontSize: 16 },
+    gpsBannerTx: { flex: 1, color: '#fff', fontSize: 13, fontWeight: '700' },
 });
 
 // Web-only override applied inline — keeps StyleSheet types clean

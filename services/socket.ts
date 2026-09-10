@@ -20,6 +20,7 @@ class SocketService {
     private pendingListeners: Array<{ event: string; callback: (data: any) => void }> = [];
     private connectionChangeCallbacks: Array<(connected: boolean) => void> = [];
     private connectPromise: Promise<boolean> | null = null; // 🔧 evita conexiones concurrentes
+    private currentToken: string | null = null; // 🔧 token del socket vivo (fuente confiable, no socket.auth)
 
     /**
      * Connect to WebSocket server
@@ -49,24 +50,37 @@ class SocketService {
             const isProd = !__DEV__;
             const finalUrl = isProd ? 'https://app.zuri.pe' : SOCKET_URL;
 
-            // 🔧 FIX cascada: garantizar UN SOLO socket vivo.
-            // connect() se llama desde 5 lugares (mount, focus, AppState, boton, etc).
-            // El guardia anterior solo miraba .connected, pero durante el handshake
-            // (~200-800ms) .connected es false y this.socket ya existe, permitiendo
-            // que se creen multiples io() en cascada (bug de N sockets simultaneos,
-            // confirmado en conductores 25 y 196: 5 sockets muriendo en el mismo segundo).
-            if (this.socket) {
-                const sameToken = (this.socket as any)?.auth?.token === token;
-                if (this.socket.connected && sameToken) {
-                    console.log('🔌 [SocketService] Ya conectado (mismo token), reutilizando');
+            // 🔧 IDEMPOTENTE REAL: reutilizar SIEMPRE el socket existente si es del mismo
+            // token. socket.io gestiona la reconexion automatica (reconnection:true), asi que
+            // NUNCA hay que destruir un socket vivo/reconectando por una llamada repetida de
+            // connect() (mount x2, focus, AppState, boton = 5 fuentes). El guardia anterior
+            // destruia el socket cuando .connected era false (handshake o auto-reconnect),
+            // generando el ciclo "client namespace disconnect" cada pocos segundos.
+            if (this.socket && this.currentToken === token) {
+                if (this.socket.connected) {
+                    console.log('🔌 [SocketService] Ya conectado, reutilizando');
                     return true;
                 }
-                console.log('🔌 [SocketService] Limpiando socket previo antes de reconectar (estado:', this.socket.connected ? 'conectado' : 'handshake/desconectado', ')');
+                if (this.socket.active) {
+                    // Reconexion automatica en curso: socket.io lo maneja, no tocar.
+                    console.log('🔌 [SocketService] Reconexion automatica en curso, reutilizando');
+                    return true;
+                }
+                // Socket inactivo (disconnect manual previo): reactivar SIN recrear.
+                console.log('🔌 [SocketService] Reactivando socket existente');
+                this.socket.connect();
+                return true;
+            }
+
+            // Token distinto (relogin) o sin socket: recrear limpiando el previo.
+            if (this.socket) {
+                console.log('🔌 [SocketService] Token distinto, recreando socket');
                 this.socket.removeAllListeners();
                 this.socket.disconnect();
                 this.socket = null;
             }
 
+            this.currentToken = token;
             console.log('🔌 [SocketService] Connecting to:', finalUrl);
 
             this.socket = io(finalUrl, {
@@ -189,9 +203,11 @@ class SocketService {
      */
     disconnect() {
         if (this.socket) {
+            this.socket.removeAllListeners();
             this.socket.disconnect();
             this.socket = null;
         }
+        this.currentToken = null; // fuerza recreacion limpia en el proximo connect()
     }
 
     /**
