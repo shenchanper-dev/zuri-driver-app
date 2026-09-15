@@ -58,9 +58,14 @@ export default function ProfileScreen() {
         } else {
             setIsToggling(true);
             try {
-                const gpsOk = await iniciarTurno();
+                // ZURI-FIX 2026-09-15: watchdog de 15s para el flujo completo — evita spinner infinito
+                const gpsOk = await Promise.race([
+                    iniciarTurno(),
+                    new Promise((res) => setTimeout(() => res(false), 15000)),
+                ]) as boolean;
                 if (!gpsOk) {
-                    Alert.alert('GPS no disponible', 'Verifica que el GPS esté activado y que la app tenga permisos de ubicación.');
+                    try { await driverApi.updateProfile({ estadoServicio: 'DESCONECTADO' }); } catch {}
+                    Alert.alert('GPS no disponible', 'Verifica que el GPS esté activado y que la app tenga permisos de ubicación. Si el problema persiste intenta nuevamente en unos segundos.');
                     return;
                 }
                 await driverApi.updateProfile({ estadoServicio: 'DISPONIBLE' });
@@ -69,6 +74,7 @@ export default function ProfileScreen() {
                 });
             } catch (e) {
                 console.warn('[Profile] Error al conectar:', e);
+                try { await driverApi.updateProfile({ estadoServicio: 'DESCONECTADO' }); } catch {}
             } finally {
                 setIsToggling(false);
             }

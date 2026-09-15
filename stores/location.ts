@@ -163,7 +163,11 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
             // ZURI-FIX 2026-03-31: requestBackgroundPermissionsAsync no existe en web — solo nativo
             let backgroundStatus = 'denied';
             if (Platform.OS !== 'web') {
-                const { status } = await Location.requestBackgroundPermissionsAsync(); // ZURI-FIX 2026-03-31
+                // ZURI-FIX 2026-09-15: timeout 10s por si usuario ignora dialogo de permisos background
+                const { status } = await Promise.race([
+                    Location.requestBackgroundPermissionsAsync(),
+                    new Promise((res) => setTimeout(() => res({ status: 'denied' }), 10000)),
+                ]) as { status: string };
                 backgroundStatus = status;
                 if (backgroundStatus !== 'granted') {
                     console.warn('Background location permission denied');
@@ -188,7 +192,11 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
                         { enableHighAccuracy: false, timeout: 5000 }
                     );
                 } else {
-                    const quickPos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+                    // ZURI-FIX 2026-09-15: timeout 8s para evitar cuelgue infinito en Samsung A22 (bug Conectarse)
+                    const quickPos = await Promise.race([
+                        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+                        new Promise((_, rej) => setTimeout(() => rej(new Error('GPS timeout after 8s')), 8000)),
+                    ]) as Awaited<ReturnType<typeof Location.getCurrentPositionAsync>>;
                     get().updateLocation({
                         latitude: quickPos.coords.latitude,
                         longitude: quickPos.coords.longitude,
@@ -227,9 +235,10 @@ export const useLocationStore = create<LocationState>()((set, get) => ({
                 // ZURI-FIX 2026-04-03: guardar watchId para cleanup en stopTracking
                 (set as any)({ _webWatchId: watchId });
             } else {
+                // ZURI-FIX 2026-09-15: Accuracy.High cuelga en Samsung A22 en interiores — Balanced es suficiente para tracking
                 await Location.watchPositionAsync(
                     {
-                        accuracy: Location.Accuracy.High,
+                        accuracy: Location.Accuracy.Balanced,
                         distanceInterval: 10,      // Update every 10 meters
                         timeInterval: 5000         // Or every 5 seconds
                     },

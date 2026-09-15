@@ -332,6 +332,16 @@ export const useAuthStore = create<AuthState>()(
             // ========================================
             logout: async () => {
                 await secureStorage.deleteItem(TOKEN_KEY);
+                // ZURI-FIX 2026-09-15: limpiar AsyncStorage residual (turno activo, GPS queue)
+                // para que la siguiente sesion de otro conductor no herede estado.
+                try {
+                    await AsyncStorage.multiRemove([
+                        'zuri_turno_activo',
+                        'zuri_gps_queue',
+                    ]);
+                } catch (e) {
+                    console.warn('[AuthStore] logout AsyncStorage cleanup failed:', e);
+                }
                 set({
                     isAuthenticated: false,
                     conductor: null,

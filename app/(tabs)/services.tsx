@@ -48,7 +48,9 @@ export default function ServicesScreen() {
     // ── Load services ─────────────────────────────────────────────────────────
     const loadServices = useCallback(async () => {
         try {
-            const response = await driverApi.getServices();
+            // ZURI-FIX 2026-09-15: pasar fecha=hoy para no traer 30 dias (evita datos viejos pegados)
+            const hoy = new Date().toISOString().split('T')[0];
+            const response = await driverApi.getServices({ fecha: hoy });
             console.log('[ZURI] getServices:', response.success, 'count:', response.servicios?.length, response.error || '');
             if (response.success) {
                 setServices(response.servicios ?? []);
