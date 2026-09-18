@@ -14,11 +14,36 @@ import { MapaDriver, MapaDriverRef } from '@/components/MapaDriver';
 import { HomeBottomSheet } from '@/components/HomeBottomSheet';
 import { ChatScreen } from '@/components/ChatScreen';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
+import {
+    configureNativeTracking,
+    startNativeTracking,
+    stopNativeTracking,
+    getNativeTrackingState,
+} from '@/services/nativeTracking';
+import { secureStorage, TOKEN_KEY } from '@/services/storage';
 
 export default function HomeScreen() {
     const router = useRouter();
     const { conductor } = useAuthStore();
     usePushNotifications(conductor?.id);
+
+    // ── Fase A: Native Tracking (Transistorsoft) — corre en paralelo al viejo sistema
+    useEffect(() => {
+        if (!conductor?.id) return;
+        (async () => {
+            try {
+                const token = await secureStorage.getItem(TOKEN_KEY);
+                if (!token) {
+                    console.warn('[NativeTracking] No auth token available');
+                    return;
+                }
+                await configureNativeTracking(conductor.id, token);
+                console.log('[NativeTracking] Configured for conductor', conductor.id);
+            } catch (err) {
+                console.error('[NativeTracking] Configure failed:', err);
+            }
+        })();
+    }, [conductor?.id]);
     const {
         isTracking, iniciarTurno, finalizarTurno,
         verificarTurnoPeristido, isConnected, currentLocation,
@@ -101,8 +126,22 @@ export default function HomeScreen() {
                 socket.connect().then(connected => {
                     if (connected) useLocationStore.getState().setConnected(true);
                 });
+                // ── Fase A: arrancar Foreground Service persistente (Transistorsoft)
+                try {
+                    await startNativeTracking();
+                    console.log('[Home] Native tracking STARTED');
+                } catch (err) {
+                    console.warn('[Home] Native tracking start failed:', err);
+                }
                 checkServiciosPendientes();
             } else {
+                // ── Fase A: parar Foreground Service persistente
+                try {
+                    await stopNativeTracking();
+                    console.log('[Home] Native tracking STOPPED');
+                } catch (err) {
+                    console.warn('[Home] Native tracking stop failed:', err);
+                }
                 await finalizarTurno();
                 useLocationStore.getState().setConnected(false);
                 socket.disconnect();

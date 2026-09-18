@@ -2,7 +2,7 @@
   "expo": {
     "name": "ZURI Conductor",
     "slug": "zuri-driver-app",
-    "version": "1.0.8",
+    "version": "2.0.0-alpha.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "zuridriver",
@@ -23,7 +23,9 @@
         "UIBackgroundModes": [
           "location",
           "fetch"
-        ]
+        ],
+        "NSSpeechRecognitionUsageDescription": "ZURI usa reconocimiento de voz para ingresar texto manos libres.",
+        "NSMicrophoneUsageDescription": "ZURI necesita el micrófono para reconocimiento de voz."
       }
     },
     "android": {
@@ -33,7 +35,7 @@
       },
       "package": "pe.zuri.conductor",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 9,
+      "versionCode": 100,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -82,6 +84,7 @@
         }
       ],
       "expo-task-manager",
+      "react-native-background-geolocation",
       [
         "expo-local-authentication",
         {
@@ -137,14 +140,18 @@
           {
             "source": "/togu",
             "destination": "/login"
+          },
+          {
+            "source": "/togu",
+            "destination": "/login"
           }
         ]
       },
       "eas": {
-        "projectId": "0eae9dfa-a897-445d-89b0-9cdb74ea905c"
+        "projectId": "df9417e0-2cb9-4280-b4b3-9fe31c899d13"
       }
     },
-    "owner": "peruia",
+    "owner": "baztonino",
     "runtimeVersion": {
       "policy": "appVersion"
     },
