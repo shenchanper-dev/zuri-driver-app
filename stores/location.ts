@@ -1,109 +1,40 @@
 /**
- * ZURI Driver App - Location Store
- * Manages GPS tracking, background location, and WebSocket updates
+ * ZURI Driver App — Location Store (SHIM HONESTO sobre BackgroundGeolocation)
+ *
+ * REFACTOR 2026-09-19 tracking-nativo-auto:
+ * Este archivo era el stack viejo con expo-location + watchPositionAsync.
+ * Ahora es un SHIM HONESTO que refleja el estado REAL derivado de:
+ *   - BackgroundGeolocation.getState().enabled (Foreground Service corriendo)
+ *   - lastServerAckAt (< 120s desde el último onHttp exitoso)
+ *
+ * NO es un flag local que se desincronize del estado real. Un consumer que
+ * lee `isTracking` obtiene la verdad: si Transistorsoft se cayó por OS-kill,
+ * licencia expirada, permisos revocados, etc., isTracking pasa a false
+ * automáticamente dentro de 15s (interval de recompute) o al siguiente
+ * evento onHttp/onLocation.
+ *
+ * Las funciones legacy (iniciarTurno, finalizarTurno, etc.) son no-op con
+ * warning porque el tracking ahora es AUTOMÁTICO:
+ *   - Arranca: en login exitoso (stores/auth.ts)
+ *   - Recovery: en cold-start con sesión válida (app/_layout.tsx)
+ *   - Sobrevive: OS-kill y reboot (stopOnTerminate:false + startOnBoot:true)
+ *   - Para: solo en logout (stores/auth.ts) o "Terminar turno" en Perfil
+ *
+ * Consumers finales de este store (mientras se migran a useServerTrackingStatus):
+ *   - app/(tabs)/index.tsx: isTracking (isOnline), currentLocation (mapa)
+ *   - app/(tabs)/profile.tsx: nada crítico (todo migrado a nativeTracking directo)
  */
 
 import { create } from 'zustand';
-import { Platform } from 'react-native';
-import * as Location from 'expo-location';
-import * as Battery from 'expo-battery';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { socket } from '@/services/socket';
-import { useAuthStore } from '@/stores/auth';
-import {
-    startBackgroundLocation,
-    stopBackgroundLocation,
-    isBackgroundLocationActive,
-} from '@/services/backgroundLocation';
+import BackgroundGeolocation, { Location } from 'react-native-background-geolocation';
 
-const TURNO_ACTIVO_KEY = 'zuri_turno_activo';
+// Umbral de liveness: 2 min sin ACK del server => isTracking = false.
+// Mismo threshold que hooks/useServerTrackingStatus para consistencia.
+const LIVENESS_THRESHOLD_MS = 120_000;
+// Cada cuánto recomputar isTracking (para detectar cuando ackAge cruza el umbral).
+const RECOMPUTE_INTERVAL_MS = 15_000;
 
-// ============================================================================
-// Offline GPS queue — persisted in AsyncStorage (survives app restarts)
-// ============================================================================
-const GPS_QUEUE_KEY = 'zuri_gps_queue';
-const MAX_QUEUE_SIZE = 500;
-// Dirty flag: true when the queue has items — avoids reading AsyncStorage on every connected GPS update
-let gpsQueueDirty = false;
-
-interface QueuedLocation {
-    conductorId: number;
-    data: any;
-    queuedAt: number;
-}
-
-async function loadGpsQueue(): Promise<QueuedLocation[]> {
-    try {
-        const raw = await AsyncStorage.getItem(GPS_QUEUE_KEY);
-        return raw ? JSON.parse(raw) : [];
-    } catch {
-        return [];
-    }
-}
-
-async function saveGpsQueue(queue: QueuedLocation[]): Promise<void> {
-    try {
-        await AsyncStorage.setItem(GPS_QUEUE_KEY, JSON.stringify(queue));
-    } catch (e) {
-        console.error('[GPS Queue] Save error:', e);
-    }
-}
-
-async function enqueueLocation(conductorId: number, data: any): Promise<void> {
-    const queue = await loadGpsQueue();
-    queue.push({ conductorId, data, queuedAt: Date.now() });
-    await saveGpsQueue(queue.slice(-MAX_QUEUE_SIZE));
-    gpsQueueDirty = true;
-}
-
-async function flushGpsQueue(): Promise<void> {
-    const queue = await loadGpsQueue();
-    if (queue.length === 0) { gpsQueueDirty = false; return; }
-
-    const sentIndices = new Set<number>();
-    queue.forEach(({ conductorId, data }, idx) => {
-        if (socket.isConnected) {
-            socket.emit('driver:location:update', { conductorId, ...data });
-            sentIndices.add(idx);
-        }
-    });
-
-    if (sentIndices.size === 0) return;
-
-    // Persist only items that weren't sent (socket may have dropped mid-flush)
-    const remaining = queue.filter((_, idx) => !sentIndices.has(idx));
-    if (remaining.length > 0) {
-        await saveGpsQueue(remaining);
-    } else {
-        await AsyncStorage.removeItem(GPS_QUEUE_KEY);
-        gpsQueueDirty = false;
-    }
-    console.log(`📤 [GPS Queue] Flushed ${sentIndices.size} location(s), ${remaining.length} remain`);
-}
-
-function sendLocationViaSocket(conductorId: number, data: any) {
-    if (socket.isConnected) {
-        if (gpsQueueDirty) flushGpsQueue().catch(() => {});
-        socket.emit('driver:location:update', { conductorId, ...data });
-    } else {
-        enqueueLocation(conductorId, data).catch(e =>
-            console.error('[GPS Queue] Enqueue error:', e)
-        );
-    }
-}
-
-// Single registration guard — prevents duplicate listeners on hot reload
-let _flushListenerRegistered = false;
-if (!_flushListenerRegistered) {
-    socket.on('connect', () => { flushGpsQueue().catch(() => {}); });
-    _flushListenerRegistered = true;
-}
-
-// ============================================================================
-// Types
-// ============================================================================
-
-interface LocationData {
+export interface LocationData {
     latitude: number;
     longitude: number;
     heading?: number;
@@ -113,319 +44,167 @@ interface LocationData {
 }
 
 interface LocationState {
-    // State
-    currentLocation: LocationData | null;
-    isTracking: boolean;
-    isConnected: boolean;
-    lastUpdate: string | null;
-    batteryLevel: number | null;
+    // ── Estado HONESTO (derivado del estado real de Transistorsoft) ────────
+    isTracking: boolean;             // Foreground Service enabled + ACK server <2min
+    currentLocation: LocationData | null; // última posición conocida (con timestamp)
+    lastLocationAt: number | null;   // ms epoch — consumers pueden computar edad
+    lastServerAckAt: number | null;  // ms epoch del último onHttp 2xx
+    isConnected: boolean;             // socket WS (informativo, no bloqueante)
+    batteryLevel: number;             // último battery% reportado por el módulo
     error: string | null;
 
-    // Actions
+    // ── Actions internas ───────────────────────────────────────────────────
+    _recomputeLiveness: () => Promise<void>;
+    _onServerAck: () => void;
+    setConnected: (connected: boolean) => void;
+    updateLocation: (loc: LocationData) => void;
+    setBatteryLevel: (level: number) => void;
+
+    // ── API DEPRECADA — no-op con warnings ─────────────────────────────────
+    // El tracking arranca en login (auth.ts), recovery en _layout, para en logout.
+    // Estas funciones existían en el stack viejo (expo-location manual).
+    // Ahora son no-op para no romper consumers residuales que aún las llamen.
     startTracking: () => Promise<boolean>;
     stopTracking: () => Promise<void>;
-    updateLocation: (location: LocationData) => void;
-    setBatteryLevel: (level: number) => void;
-    setConnected: (connected: boolean) => void;
-
-    // Turno (aliases con persistencia)
     iniciarTurno: () => Promise<boolean>;
     finalizarTurno: () => Promise<void>;
     verificarTurnoPeristido: () => Promise<boolean>;
 }
 
-// ============================================================================
-// Store
-// ============================================================================
-
 export const useLocationStore = create<LocationState>()((set, get) => ({
-    // Initial state
-    currentLocation: null,
     isTracking: false,
+    currentLocation: null,
+    lastLocationAt: null,
+    lastServerAckAt: null,
     isConnected: false,
-    lastUpdate: null,
-    batteryLevel: null,
+    batteryLevel: 0,
     error: null,
 
-    // ========================================
-    // Start GPS Tracking
-    // ========================================
-    startTracking: async () => {
+    _recomputeLiveness: async () => {
         try {
-            // Request permissions
-            const { status: foregroundStatus } = await Location.requestForegroundPermissionsAsync();
-
-            if (foregroundStatus !== 'granted') {
-                set({ error: 'Permiso de ubicación denegado' });
-                return false;
+            const bgState = await BackgroundGeolocation.getState();
+            const now = Date.now();
+            const ackAge = get().lastServerAckAt != null ? now - get().lastServerAckAt! : Infinity;
+            const isLive = bgState.enabled && ackAge < LIVENESS_THRESHOLD_MS;
+            if (get().isTracking !== isLive) {
+                set({ isTracking: isLive });
             }
-
-            // ZURI-FIX 2026-03-31: requestBackgroundPermissionsAsync no existe en web — solo nativo
-            let backgroundStatus = 'denied';
-            if (Platform.OS !== 'web') {
-                // ZURI-FIX 2026-09-15: timeout 10s por si usuario ignora dialogo de permisos background
-                const { status } = await Promise.race([
-                    Location.requestBackgroundPermissionsAsync(),
-                    new Promise((res) => setTimeout(() => res({ status: 'denied' }), 10000)),
-                ]) as { status: string };
-                backgroundStatus = status;
-                if (backgroundStatus !== 'granted') {
-                    console.warn('Background location permission denied');
-                }
-            }
-
-            // ZURI-FIX 2026-05-20: obtener posición inmediata para mostrar auto al instante
-            try {
-                if (Platform.OS === "web" && typeof navigator !== "undefined" && navigator.geolocation) {
-                    navigator.geolocation.getCurrentPosition(
-                        (pos) => {
-                            get().updateLocation({
-                                latitude: pos.coords.latitude,
-                                longitude: pos.coords.longitude,
-                                heading: pos.coords.heading ?? undefined,
-                                speed: pos.coords.speed ?? undefined,
-                                accuracy: pos.coords.accuracy ?? undefined,
-                                timestamp: new Date().toISOString(),
-                            });
-                        },
-                        () => {},
-                        { enableHighAccuracy: false, timeout: 5000 }
-                    );
-                } else {
-                    // ZURI-FIX 2026-09-15: timeout 8s para evitar cuelgue infinito en Samsung A22 (bug Conectarse)
-                    const quickPos = await Promise.race([
-                        Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
-                        new Promise((_, rej) => setTimeout(() => rej(new Error('GPS timeout after 8s')), 8000)),
-                    ]) as Awaited<ReturnType<typeof Location.getCurrentPositionAsync>>;
-                    get().updateLocation({
-                        latitude: quickPos.coords.latitude,
-                        longitude: quickPos.coords.longitude,
-                        heading: quickPos.coords.heading ?? undefined,
-                        speed: quickPos.coords.speed ?? undefined,
-                        accuracy: quickPos.coords.accuracy ?? undefined,
-                        timestamp: new Date(quickPos.timestamp).toISOString(),
-                    });
-                }
-            } catch (e) { console.warn("[Location] Quick position failed:", e); }
-
-            // Start foreground tracking
-            if (Platform.OS === 'web' && typeof navigator !== 'undefined' && navigator.geolocation) {
-                console.log('🌐 [Location] Using Web Geolocation API');
-                const watchId = navigator.geolocation.watchPosition(
-                    (position) => {
-                        const locData: LocationData = {
-                            latitude: position.coords.latitude,
-                            longitude: position.coords.longitude,
-                            heading: position.coords.heading ?? undefined,
-                            speed: position.coords.speed ?? undefined,
-                            accuracy: position.coords.accuracy ?? undefined,
-                            timestamp: new Date().toISOString()
-                        };
-                        get().updateLocation(locData);
-                    },
-                    (error) => {
-                        console.error('Web Geolocation error:', error);
-                        set({ error: `GPS Web Error: ${error.message}` });
-                    },
-                    {
-                        enableHighAccuracy: true,
-                        maximumAge: 5000,
-                    }
-                );
-                // ZURI-FIX 2026-04-03: guardar watchId para cleanup en stopTracking
-                (set as any)({ _webWatchId: watchId });
-            } else {
-                // ZURI-FIX 2026-09-15: Accuracy.High cuelga en Samsung A22 en interiores — Balanced es suficiente para tracking
-                await Location.watchPositionAsync(
-                    {
-                        accuracy: Location.Accuracy.Balanced,
-                        distanceInterval: 10,      // Update every 10 meters
-                        timeInterval: 5000         // Or every 5 seconds
-                    },
-                    (location) => {
-                        const locData: LocationData = {
-                            latitude: location.coords.latitude,
-                            longitude: location.coords.longitude,
-                            heading: location.coords.heading ?? undefined,
-                            speed: location.coords.speed ?? undefined,
-                            accuracy: location.coords.accuracy ?? undefined,
-                            timestamp: new Date().toISOString()
-                        };
-
-                        get().updateLocation(locData);
-                    }
-                );
-            }
-
-            if (Platform.OS !== 'web' && backgroundStatus === 'granted') {
-                const conductorId = useAuthStore.getState().conductor?.id;
-                if (conductorId) {
-                    await startBackgroundLocation(conductorId).catch(e =>
-                        console.error('[Location] startBackgroundLocation error:', e)
-                    );
-                }
-            }
-
-            // ZURI-FIX 2026-04-03: Battery API puede lanzar excepción en navegadores
-            // que no soportan Battery Status API (Safari iOS, Firefox mobile).
-            // No debe impedir que isTracking se active.
-            try {
-                const batteryLevel = await Battery.getBatteryLevelAsync();
-                set({ batteryLevel: batteryLevel * 100 }); // Convert 0-1 to 0-100
-
-                // Suscribirse a cambios de batería
-                Battery.addBatteryLevelListener(({ batteryLevel }) => {
-                    set({ batteryLevel: batteryLevel * 100 });
-                });
-            } catch (batteryError) {
-                console.warn('[Location] Battery API not available (normal on some browsers):', batteryError);
-            }
-
-            set({ isTracking: true, error: null });
-            return true;
-
-        } catch (error: any) {
-            set({ error: error.message, isTracking: false });
-            return false;
+        } catch {
+            if (get().isTracking !== false) set({ isTracking: false });
         }
     },
 
-    // ========================================
-    // Stop GPS Tracking
-    // ========================================
-    stopTracking: async () => {
-        try {
-            await stopBackgroundLocation();
-
-            if (Platform.OS === 'web') {
-                // ZURI-FIX 2026-04-03: limpiar watchPosition en web
-                const watchId = (get() as any)._webWatchId;
-                if (watchId != null && typeof navigator !== 'undefined' && navigator.geolocation) {
-                    navigator.geolocation.clearWatch(watchId);
-                    console.log('[Location] Web watchPosition cleared');
-                }
-            }
-
-            set({ isTracking: false });
-        } catch (error) {
-            console.error('Error stopping tracking:', error);
-            set({ isTracking: false }); // ZURI-FIX 2026-04-03: asegurar reset del estado incluso si hay error
-        }
+    _onServerAck: () => {
+        set({ lastServerAckAt: Date.now() });
+        get()._recomputeLiveness();
     },
 
-    // ========================================
-    // Update Location & Send to Server
-    // ========================================
-    updateLocation: (location) => {
-        set({
-            currentLocation: location,
-            lastUpdate: location.timestamp
-        });
-
-        // Send to WebSocket (with offline queue fallback)
-        const conductorId = useAuthStore.getState().conductor?.id;
-        if (conductorId) {
-            sendLocationViaSocket(conductorId, {
-                latitude: location.latitude,
-                longitude: location.longitude,
-                heading: location.heading,
-                speed: location.speed,
-                accuracy: location.accuracy,
-                batteryLevel: get().batteryLevel,
-            });
-        }
-
-        // Also send via HTTP API as backup
-        if (conductorId) {
-            fetch(`${process.env.EXPO_PUBLIC_API_URL || 'https://admin.zuri.pe/api'}/conductores/gps-tracking`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    conductorId,
-                    latitud: location.latitude,
-                    longitud: location.longitude,
-                    precision: location.accuracy,
-                    velocidad: location.speed ? location.speed * 3.6 : null, // Convert m/s to km/h
-                    rumbo: location.heading,
-                    nivelBateria: get().batteryLevel
-                })
-            }).catch(err => console.error('HTTP GPS update error:', err));
-        }
-    },
-
-    // ========================================
-    // Battery Level
-    // ========================================
-    setBatteryLevel: (level) => set({ batteryLevel: level }),
-
-    // ========================================
-    // Connection Status
-    // ========================================
     setConnected: (connected) => set({ isConnected: connected }),
+    setBatteryLevel: (level) => set({ batteryLevel: level }),
+    updateLocation: (loc) => set({
+        currentLocation: loc,
+        lastLocationAt: Date.now(),
+    }),
 
-    // ========================================================================
-    // iniciarTurno — pide permisos, arranca GPS foreground + background,
-    // persiste el estado en AsyncStorage para poder reanudarlo al reiniciar app.
-    // ========================================================================
+    // ────────── API DEPRECADA — no-op ──────────
+    startTracking: async () => {
+        console.warn(
+            '[LocationStore] startTracking() DEPRECADO. El tracking arranca automatico ' +
+            'post-login (stores/auth.ts). Este llamado es NO-OP.'
+        );
+        await get()._recomputeLiveness();
+        return get().isTracking;
+    },
+    stopTracking: async () => {
+        console.warn(
+            '[LocationStore] stopTracking() DEPRECADO. Usa "Terminar turno" en Perfil ' +
+            '(llama stopNativeTracking + logout). Este llamado es NO-OP.'
+        );
+    },
     iniciarTurno: async () => {
-        try {
-            const ok = await get().startTracking();
-            if (ok) {
-                await AsyncStorage.setItem(TURNO_ACTIVO_KEY, 'true');
-            }
-            return ok;
-        } catch (err) {
-            console.error('[Location] iniciarTurno error:', err);
-            return false;
-        }
+        console.warn(
+            '[LocationStore] iniciarTurno() DEPRECADO. Tracking automatico post-login. NO-OP.'
+        );
+        await get()._recomputeLiveness();
+        return get().isTracking;
     },
-
-    // ========================================================================
-    // finalizarTurno — detiene GPS y limpia el estado persistido.
-    // ========================================================================
     finalizarTurno: async () => {
-        try {
-            await get().stopTracking();
-            await AsyncStorage.removeItem(TURNO_ACTIVO_KEY);
-        } catch (err) {
-            console.error('[Location] finalizarTurno error:', err);
-        }
+        console.warn(
+            '[LocationStore] finalizarTurno() DEPRECADO. Usa "Terminar turno" en Perfil. NO-OP.'
+        );
     },
-
-    // ========================================================================
-    // verificarTurnoPeristido — al iniciar la app comprueba si había turno
-    // activo y, si la tarea background sigue corriendo, reactiva el estado.
-    // ========================================================================
     verificarTurnoPeristido: async () => {
-        try {
-            const valor = await AsyncStorage.getItem(TURNO_ACTIVO_KEY);
-            if (valor !== 'true') return false;
-
-            // En nativo verificar si la tarea background está registrada
-            if (Platform.OS !== 'web') {
-                const tareaActiva = await isBackgroundLocationActive();
-                if (tareaActiva) {
-                    // La tarea background sigue corriendo pero NO actualiza el store —
-                    // arrancar watcher foreground para refrescar currentLocation y el mapa.
-                    set({ isTracking: true });
-                    get().startTracking().catch(() => {});
-                    console.log('[Location] Turno reanudado — tarea background activa + watcher foreground re-armado');
-                    return true;
-                }
-                // La tarea no está activa aunque haya flag → rearrancar GPS completo
-                console.log('[Location] Turno persistido pero tarea inactiva — reiniciando GPS');
-                return get().iniciarTurno();
-            }
-
-            // ZURI-FIX 2026-04-10: En web también rearrancar tracking si turno estaba activo
-            // Esto permite que al recargar la PWA el socket vuelva a conectarse
-            console.log('[Location] Turno persistido en web — reiniciando tracking');
-            return get().iniciarTurno();
-        } catch (err) {
-            console.error('[Location] verificarTurnoPeristido error:', err);
-            return false;
-        }
+        console.warn(
+            '[LocationStore] verificarTurnoPeristido() DEPRECADO. _layout hace recovery ' +
+            'automatico. Este llamado solo dispara recompute de liveness.'
+        );
+        await get()._recomputeLiveness();
+        return get().isTracking;
     },
 }));
 
-// Background task is defined in services/backgroundLocation.ts
+// ── Attach listeners (idempotente, un solo bind por proceso) ─────────────────
+// Debe llamarse desde app/_layout.tsx al arrancar la app.
+let _attached = false;
+let _intervalId: ReturnType<typeof setInterval> | null = null;
+
+export function attachBackgroundGeolocationListener() {
+    if (_attached) return;
+    _attached = true;
+
+    // onLocation: guardar posición + timestamp
+    BackgroundGeolocation.onLocation((loc: Location) => {
+        useLocationStore.getState().updateLocation({
+            latitude: loc.coords.latitude,
+            longitude: loc.coords.longitude,
+            heading: loc.coords.heading ?? undefined,
+            speed: loc.coords.speed ?? undefined,
+            accuracy: loc.coords.accuracy ?? undefined,
+            timestamp: typeof loc.timestamp === 'string'
+                ? loc.timestamp
+                : new Date(loc.timestamp).toISOString(),
+        });
+        if (typeof loc.battery?.level === 'number') {
+            useLocationStore.getState().setBatteryLevel(Math.round(loc.battery.level * 100));
+        }
+    }, (errCode) => {
+        console.warn('[LocationStore] BG location error code:', errCode);
+    });
+
+    // onHttp: registrar cada ACK exitoso del server. ESTO es lo que hace isTracking honesto.
+    BackgroundGeolocation.onHttp((response: any) => {
+        if (response.success) {
+            useLocationStore.getState()._onServerAck();
+        }
+    });
+
+    // Recompute periódico: detecta cuando ackAge cruza el umbral (isTracking pasa a false)
+    _intervalId = setInterval(() => {
+        useLocationStore.getState()._recomputeLiveness();
+    }, RECOMPUTE_INTERVAL_MS);
+
+    // Initial compute
+    useLocationStore.getState()._recomputeLiveness();
+}
+
+// ── Selectores utiles para consumers (evita computar edad manualmente) ───────
+
+/**
+ * True si la última posición tiene <maxAgeSec segundos.
+ * Uso: const posFresca = useLocationStore(isCurrentLocationFresh(60));
+ */
+export function isCurrentLocationFresh(maxAgeSec: number = 120) {
+    return (state: LocationState): boolean => {
+        if (!state.currentLocation || !state.lastLocationAt) return false;
+        return (Date.now() - state.lastLocationAt) < maxAgeSec * 1000;
+    };
+}
+
+/**
+ * Edad de la última posición en segundos, o null si nunca hubo posición.
+ * Uso: const edad = useLocationStore(currentLocationAgeSec);
+ */
+export function currentLocationAgeSec(state: LocationState): number | null {
+    if (!state.lastLocationAt) return null;
+    return Math.floor((Date.now() - state.lastLocationAt) / 1000);
+}

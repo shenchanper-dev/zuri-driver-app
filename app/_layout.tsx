@@ -13,6 +13,10 @@ import { setupNotificationChannel, setupNotificationListeners, setForegroundNoti
 import { NuevoServicioPopup } from '@/components/NuevoServicioPopup';
 import notifee, { EventType } from '@notifee/react-native';
 import { socket } from '@/services/socket';
+// Refactor tracking-nativo-auto: recovery del Foreground Service
+import { configureNativeTracking, startNativeTracking, getNativeTrackingState } from '@/services/nativeTracking';
+import { attachBackgroundGeolocationListener } from '@/stores/location';
+import { secureStorage, TOKEN_KEY } from '@/services/storage';
 
 // Unifica campos snake_case / camelCase entre WebSocket, Push y Notifee
 function normalizeServicioData(raw: any) {
@@ -176,6 +180,35 @@ function RootLayoutContent() {
     useEffect(() => {
         initialize();
     }, []);
+
+    // Refactor tracking-nativo-auto: recovery del Foreground Service.
+    // Si la app arranca con sesion valida (cold-start desde recientes, o post-boot),
+    // reanudar tracking. stopOnTerminate:false + startOnBoot:true en Transistorsoft
+    // significa que el service ya deberia estar vivo — solo aseguramos config sync.
+    useEffect(() => {
+        attachBackgroundGeolocationListener();
+    }, []);
+    useEffect(() => {
+        if (isLoading || !isAuthenticated) return;
+        const { conductor } = useAuthStore.getState();
+        if (!conductor?.id) return;
+        (async () => {
+            try {
+                const token = await secureStorage.getItem(TOKEN_KEY);
+                if (!token) return;
+                await configureNativeTracking(conductor.id, token);
+                const state = await getNativeTrackingState();
+                if (!state.enabled) {
+                    await startNativeTracking();
+                    console.log('[_layout] nativeTracking auto-arrancado por sesion valida');
+                } else {
+                    console.log('[_layout] nativeTracking ya estaba corriendo (recovery)');
+                }
+            } catch (err: any) {
+                console.warn('[_layout] recovery nativeTracking fallo:', err?.message);
+            }
+        })();
+    }, [isAuthenticated, isLoading]);
 
     useEffect(() => {
         const setup = async () => {

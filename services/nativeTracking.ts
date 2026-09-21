@@ -1,21 +1,18 @@
 /**
- * ZURI Driver App — Native Tracking Service (Fase A prototipo)
+ * ZURI Driver App — Native Tracking Service (v5 API)
  *
- * Reemplazo experimental de services/backgroundLocation.ts.
- * Usa @transistorsoft/react-native-background-geolocation (nombre público:
- * "react-native-background-geolocation" v5.6.0, licencia MIT para Android free tier).
+ * REFACTOR 2026-09-18 tracking-nativo-auto:
+ * Reescrito con el Config estructurado v5 de Transistorsoft.
+ * Los sub-configs (geolocation, http, app, persistence, activity, logger)
+ * reemplazan el flat config de v4.
  *
- * Diferencias vs backgroundLocation.ts:
- *  - Foreground Service PERSISTENTE con notificación permanente (no best-effort).
- *  - Reinicia automáticamente si el OS mata la app (RECEIVE_BOOT_COMPLETED + stopOnTerminate:false).
- *  - Cola offline SQLite built-in (retry con backoff).
- *  - Motion detection (accelerometer): apaga GPS cuando el vehículo está estacionario.
- *  - Heartbeat HTTP cada 60s aunque no haya movimiento GPS.
- *
- * Este archivo NO reemplaza al viejo — se activa desde app/(tabs)/index.tsx
- * cuando el conductor presione "Conectarse".
- *
- * Referencia: /home/zuri/traccar-reference/traccar-client/ (patrón similar en Kotlin).
+ * Responsabilidades:
+ *  - Foreground Service persistente con notificación permanente
+ *  - GPS via Fused Location Provider (batería-optimizado)
+ *  - Heartbeat HTTP cada 60s independiente del GPS
+ *  - Cola offline SQLite built-in con retry autosync
+ *  - Motion detection (accelerometer): apaga GPS cuando parado
+ *  - stopOnTerminate:false + startOnBoot:true (sobrevive OS-kill y reboot)
  */
 
 import BackgroundGeolocation, {
@@ -25,6 +22,9 @@ import BackgroundGeolocation, {
     MotionChangeEvent,
     ProviderChangeEvent,
     State,
+    DesiredAccuracy,
+    LogLevel,
+    NotificationPriority,
 } from 'react-native-background-geolocation';
 import { Platform } from 'react-native';
 
@@ -37,19 +37,17 @@ const HEARTBEAT_ENDPOINT = `${API_BASE}/v3/heartbeat`;
 let _configured = false;
 let _currentConductorId: number | null = null;
 
-/**
- * Configura la librería una vez. Es idempotente — llamar múltiples veces es seguro.
- * Debe llamarse DESPUÉS de que el usuario haya dado permisos "Permitir siempre".
- */
 export async function configureNativeTracking(conductorId: number, authToken: string): Promise<State> {
     _currentConductorId = conductorId;
 
     if (_configured) {
-        // Ya configurado — solo actualizar params HTTP (por si cambió el token)
+        // Solo actualizar http config (por si cambió el token)
         await BackgroundGeolocation.setConfig({
-            url: GPS_ENDPOINT,
-            headers: { Authorization: `Bearer ${authToken}` },
-            params: { conductorId },
+            http: {
+                url: GPS_ENDPOINT,
+                headers: { Authorization: `Bearer ${authToken}` },
+                params: { conductorId },
+            },
         });
         return await BackgroundGeolocation.getState();
     }
@@ -61,64 +59,70 @@ export async function configureNativeTracking(conductorId: number, authToken: st
     BackgroundGeolocation.onHttp(_onHttp);
     BackgroundGeolocation.onProviderChange(_onProviderChange);
 
-    // ── Config inicial ────────────────────────────────────────────────────
+    // ── Config v5 estructurado ────────────────────────────────────────────
     const state = await BackgroundGeolocation.ready({
-        // Geolocation
-        desiredAccuracy: BackgroundGeolocation.DESIRED_ACCURACY_HIGH,
-        distanceFilter: 10, // meters — dispara GPS al moverse >10m
-        locationUpdateInterval: 10_000, // 10s cuando en movimiento
-        fastestLocationUpdateInterval: 5_000,
+        reset: true,
 
-        // Activity Recognition (motion detection)
-        stopTimeout: 5, // minutos parado antes de considerar "stationary"
-        activityRecognitionInterval: 10_000,
-
-        // HTTP + persistencia
-        url: GPS_ENDPOINT,
-        method: 'POST',
-        headers: { Authorization: `Bearer ${authToken}` },
-        params: { conductorId }, // se envía junto con cada location
-        autoSync: true,
-        autoSyncThreshold: 0,
-        batchSync: false,
-        maxDaysToPersist: 3,
-        maxRecordsToPersist: 10_000,
-        locationTemplate: JSON.stringify({
-            conductorId,
-            latitud: '<%= latitude %>',
-            longitud: '<%= longitude %>',
-            precision: '<%= accuracy %>',
-            velocidad: '<%= speed %>',
-            rumbo: '<%= heading %>',
-            timestamp: '<%= timestamp %>',
-            bateria: '<%= battery.level %>',
-            movimiento: '<%= is_moving %>',
-        }),
-
-        // Heartbeat cada 60s aunque no haya movimiento
-        heartbeatInterval: 60,
-
-        // Comportamiento background/foreground
-        stopOnTerminate: false, // sobrevive a app cerrada
-        startOnBoot: true, // reinicia al bootear el teléfono
-        enableHeadless: true, // corre sin UI
-        foregroundService: true, // Foreground Service persistente
-        notification: {
-            title: 'ZURI Conductor · En servicio',
-            text: 'Compartiendo tu ubicación en tiempo real',
-            channelName: 'ZURI Tracking',
-            smallIcon: 'mipmap/ic_launcher',
-            priority: BackgroundGeolocation.NOTIFICATION_PRIORITY_HIGH,
-            sticky: true, // no se puede swipe-dismiss
+        geolocation: {
+            desiredAccuracy: DesiredAccuracy.High,
+            distanceFilter: 10,
+            locationUpdateInterval: 10_000,
+            fastestLocationUpdateInterval: 5_000,
+            stopTimeout: 5,
+            locationAuthorizationRequest: 'Always',
         },
 
-        // Debug (subir a false en Fase B una vez validado)
-        debug: false,
-        logLevel: BackgroundGeolocation.LOG_LEVEL_VERBOSE,
-        logMaxDays: 3,
+        http: {
+            url: GPS_ENDPOINT,
+            method: 'POST',
+            headers: { Authorization: `Bearer ${authToken}` },
+            params: { conductorId },
+            autoSync: true,
+            autoSyncThreshold: 0,
+            batchSync: false,
+        },
 
-        // Reset config si versión mayor cambió (evita configs stale)
-        reset: true,
+        persistence: {
+            maxDaysToPersist: 3,
+            maxRecordsToPersist: 10_000,
+            locationTemplate: JSON.stringify({
+                conductorId,
+                latitud: '<%= latitude %>',
+                longitud: '<%= longitude %>',
+                precision: '<%= accuracy %>',
+                velocidad: '<%= speed %>',
+                rumbo: '<%= heading %>',
+                timestamp: '<%= timestamp %>',
+                bateria: '<%= battery.level %>',
+                movimiento: '<%= is_moving %>',
+            }),
+        },
+
+        activity: {
+            activityRecognitionInterval: 10_000,
+        },
+
+        app: {
+            stopOnTerminate: false,
+            startOnBoot: true,
+            enableHeadless: true,
+            heartbeatInterval: 60,
+            preventSuspend: true,
+            notification: {
+                title: 'ZURI Conductor · En servicio',
+                text: 'Compartiendo tu ubicación en tiempo real',
+                channelName: 'ZURI Tracking',
+                smallIcon: 'mipmap/ic_launcher',
+                priority: NotificationPriority.High,
+                sticky: true,
+            },
+        },
+
+        logger: {
+            debug: false,
+            logLevel: LogLevel.Verbose,
+            logMaxDays: 3,
+        },
     });
 
     _configured = true;
@@ -130,10 +134,6 @@ export async function configureNativeTracking(conductorId: number, authToken: st
     return state;
 }
 
-/**
- * Arranca el tracking. Debe llamarse al presionar "Conectarse".
- * Idempotente — si ya está corriendo no hace nada.
- */
 export async function startNativeTracking(): Promise<State> {
     const state = await BackgroundGeolocation.getState();
     if (state.enabled) {
@@ -145,27 +145,17 @@ export async function startNativeTracking(): Promise<State> {
     return started;
 }
 
-/**
- * Detiene el tracking (al presionar "Desconectarse" o cerrar sesión).
- */
 export async function stopNativeTracking(): Promise<State> {
     const stopped = await BackgroundGeolocation.stop();
-    // Purgar cola pendiente para no reenviar al reconectar con otra cuenta
     await BackgroundGeolocation.destroyLocations();
     console.log('[NativeTracking] STOPPED');
     return stopped;
 }
 
-/**
- * Estado actual (para UI de debug).
- */
 export async function getNativeTrackingState(): Promise<State> {
     return BackgroundGeolocation.getState();
 }
 
-/**
- * Cantidad de ubicaciones pendientes en cola offline.
- */
 export async function getPendingCount(): Promise<number> {
     return BackgroundGeolocation.getCount();
 }
@@ -190,8 +180,6 @@ function _onMotionChange(event: MotionChangeEvent) {
 }
 
 async function _onHeartbeat(event: HeartbeatEvent) {
-    // Ejecuta cada `heartbeatInterval` (60s) aunque no haya movimiento
-    // Envía un ping HTTP independiente al endpoint de heartbeat
     if (!_currentConductorId) return;
     try {
         const currentLoc = event.location;
@@ -229,15 +217,8 @@ function _onProviderChange(event: ProviderChangeEvent) {
     });
 }
 
-// ── Helper de permisos (para pantalla de bienvenida) ──────────────────────
-
-/**
- * Solicita permiso "Permitir siempre" — flujo Android 11+ requiere
- * primero conceder foreground, luego re-abrir settings para background.
- * La librería maneja este flow automáticamente.
- */
 export async function requestAlwaysPermission(): Promise<number> {
-    if (Platform.OS !== 'android') return 3; // iOS handled by ready()
+    if (Platform.OS !== 'android') return 3;
     const status = await BackgroundGeolocation.requestPermission();
     console.log('[NativeTracking] Permission status:', status);
     return status;

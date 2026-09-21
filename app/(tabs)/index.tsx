@@ -4,7 +4,6 @@ import {
     Alert, StatusBar, Platform, Modal,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import * as Location from 'expo-location';
 import { useAuthStore } from '@/stores/auth';
 import { useLocationStore } from '@/stores/location';
 import { driverApi } from '@/services/api';
@@ -14,39 +13,17 @@ import { MapaDriver, MapaDriverRef } from '@/components/MapaDriver';
 import { HomeBottomSheet } from '@/components/HomeBottomSheet';
 import { ChatScreen } from '@/components/ChatScreen';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
-import {
-    configureNativeTracking,
-    startNativeTracking,
-    stopNativeTracking,
-    getNativeTrackingState,
-} from '@/services/nativeTracking';
-import { secureStorage, TOKEN_KEY } from '@/services/storage';
+// Refactor tracking-nativo-auto: nativeTracking se gestiona desde _layout.tsx
 
 export default function HomeScreen() {
     const router = useRouter();
     const { conductor } = useAuthStore();
     usePushNotifications(conductor?.id);
 
-    // ── Fase A: Native Tracking (Transistorsoft) — corre en paralelo al viejo sistema
-    useEffect(() => {
-        if (!conductor?.id) return;
-        (async () => {
-            try {
-                const token = await secureStorage.getItem(TOKEN_KEY);
-                if (!token) {
-                    console.warn('[NativeTracking] No auth token available');
-                    return;
-                }
-                await configureNativeTracking(conductor.id, token);
-                console.log('[NativeTracking] Configured for conductor', conductor.id);
-            } catch (err) {
-                console.error('[NativeTracking] Configure failed:', err);
-            }
-        })();
-    }, [conductor?.id]);
+    // Refactor tracking-nativo-auto: configureNativeTracking ahora vive en _layout.tsx
     const {
-        isTracking, iniciarTurno, finalizarTurno,
-        verificarTurnoPeristido, isConnected, currentLocation,
+        isTracking,
+        isConnected, currentLocation,
     } = useLocationStore();
 
     const mapRef = useRef<MapaDriverRef>(null);
@@ -102,76 +79,15 @@ export default function HomeScreen() {
         }
     }, [router]);
 
-    // ── Toggle online/offline ─────────────────────────────────────────────────
-    const handleToggleStatus = async () => {
-        if (isToggling) return;
-        setIsToggling(true);
-        try {
-            if (!isOnline) {
-                const gpsOk = await iniciarTurno();
-                if (!gpsOk) {
-                    Alert.alert(
-                        'GPS no disponible',
-                        'Verifica que el GPS esté activado y que la app tenga permisos de ubicación.',
-                        [{ text: 'OK' }]
-                    );
-                    return;
-                }
-                try {
-                    await driverApi.updateProfile({ estadoServicio: 'DISPONIBLE' });
-                } catch (e) {
-                    console.warn('[Home] No se pudo actualizar estadoServicio:', e);
-                }
-                setIsToggling(false);
-                socket.connect().then(connected => {
-                    if (connected) useLocationStore.getState().setConnected(true);
-                });
-                // ── Fase A: arrancar Foreground Service persistente (Transistorsoft)
-                try {
-                    await startNativeTracking();
-                    console.log('[Home] Native tracking STARTED');
-                } catch (err) {
-                    console.warn('[Home] Native tracking start failed:', err);
-                }
-                checkServiciosPendientes();
-            } else {
-                // ── Fase A: parar Foreground Service persistente
-                try {
-                    await stopNativeTracking();
-                    console.log('[Home] Native tracking STOPPED');
-                } catch (err) {
-                    console.warn('[Home] Native tracking stop failed:', err);
-                }
-                await finalizarTurno();
-                useLocationStore.getState().setConnected(false);
-                socket.disconnect();
-                try {
-                    await driverApi.updateProfile({ estadoServicio: 'DESCONECTADO' });
-                } catch (e) {
-                    console.warn('[Home] No se pudo actualizar estadoServicio:', e);
-                }
-            }
-        } finally {
-            setIsToggling(false);
-        }
-    };
+    // Refactor tracking-nativo-auto: handleToggleStatus ELIMINADO.
+    // Estar-logueado = estar-en-linea. Sin boton "Conectarse".
 
-    // ── Mount: auto-resume turno, connect socket, load counters ──────────────
+    // Mount: connect socket, load counters
+    // Refactor tracking-nativo-auto: el arranque del tracking se hace en _layout.tsx
+    // (recovery post-sesion). Aca solo conectamos socket + refrescamos contadores.
     useEffect(() => {
-        verificarTurnoPeristido().then(reanudado => {
-            if (reanudado) {
-                console.log('[Home] Turno reanudado automáticamente');
-            } else {
-                iniciarTurno().then(ok => {
-                    if (ok) {
-                        console.log('[Home] GPS auto-iniciado al montar');
-                        socket.connect().then(connected => {
-                            if (connected) useLocationStore.getState().setConnected(true);
-                        });
-                    }
-                });
-            }
-        });
+        // Refactor tracking-nativo-auto: _layout ya hace recovery.
+        // Aqui solo conectamos socket + refrescamos contadores.
 
         if (conductor?.id) {
             socket.setDriverId(conductor.id);
@@ -217,25 +133,20 @@ export default function HomeScreen() {
         }
     }, [currentLocation, servicioActivoId]);
 
-    // ── GPS watchdog: en turno pero sin GPS (apagado o permiso denegado) ────────
-    // Modelo Uber "Waiting for GPS": avisar pero permitir. Chequea al activarse el
-    // turno y cada 15s mientras dure, y al volver a foreground (via currentLocation).
+    // Refactor tracking-nativo-auto: GPS watchdog usa BackgroundGeolocation.getProviderState()
     useEffect(() => {
-        if (!isOnline) { setGpsWarning(false); return; }
         let cancelled = false;
-        const checkGps = async () => {
+        const check = async () => {
             try {
-                const enabled = await Location.hasServicesEnabledAsync();
-                const { status } = await Location.getForegroundPermissionsAsync();
-                if (!cancelled) setGpsWarning(!enabled || status !== 'granted');
-            } catch {
-                if (!cancelled) setGpsWarning(false);
-            }
+                const BG = (await import('react-native-background-geolocation')).default;
+                const st: any = await BG.getProviderState();
+                if (!cancelled) setGpsWarning(!st?.enabled || (st?.status !== 3 && st?.status !== undefined));
+            } catch { /* no-op */ }
         };
-        checkGps();
-        const iv = setInterval(checkGps, 15000);
+        check();
+        const iv = setInterval(check, 15000);
         return () => { cancelled = true; clearInterval(iv); };
-    }, [isOnline, currentLocation]);
+    }, []);
 
     // ── Derived display values ────────────────────────────────────────────────
     const nombreCorto = conductor?.nombres
@@ -276,15 +187,17 @@ export default function HomeScreen() {
                     style={s.gpsBanner}
                     activeOpacity={0.85}
                     onPress={async () => {
-                        const enabled = await Location.hasServicesEnabledAsync().catch(() => false);
-                        if (!enabled) {
+                        const BG = (await import('react-native-background-geolocation')).default;
+                        const provider: any = await BG.getProviderState().catch(() => null);
+                        if (!provider?.enabled) {
                             Alert.alert(
                                 'GPS desactivado',
-                                'Activa la ubicación (GPS) de tu teléfono para poder recibir servicios.'
+                                'Activa la ubicacion (GPS) de tu telefono para poder recibir servicios.'
                             );
                         } else {
-                            const { status } = await Location.requestForegroundPermissionsAsync();
-                            if (status === 'granted') setGpsWarning(false);
+                            const status = await BG.requestPermission().catch(() => 0);
+                            // 3 = ALWAYS granted en el enum de Transistorsoft
+                            if (status === 3) setGpsWarning(false);
                         }
                     }}
                 >

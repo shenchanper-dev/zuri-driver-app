@@ -19,66 +19,46 @@ import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/auth';
 import { useLocationStore } from '@/stores/location';
 import { driverApi } from '@/services/api';
+// Refactor tracking-nativo-auto: 'Terminar turno' llama a stopNativeTracking + logout
+import { stopNativeTracking } from '@/services/nativeTracking';
 import { socket } from '@/services/socket';
 import { COLORS, RADIUS, SHADOW } from '@/constants/theme';
 
 export default function ProfileScreen() {
     const router = useRouter();
     const { conductor, logout } = useAuthStore();
-    const { stopTracking, isTracking, iniciarTurno, finalizarTurno } = useLocationStore();
+    const { isTracking } = useLocationStore();
     const [isToggling, setIsToggling] = useState(false);
 
-    const handleToggleConnection = async () => {
+    // Refactor tracking-nativo-auto: "Terminar turno" = stopNativeTracking + logout.
+    // Ya no existe "Conectarse" — estar-logueado = estar-en-linea automatico.
+    const handleEndShift = async () => {
         if (isToggling) return;
-        if (isTracking) {
-            Alert.alert(
-                'Desconectarse',
-                '¿Salir del servicio? Dejarás de recibir nuevos servicios y se detendrá el GPS.',
-                [
-                    { text: 'Cancelar', style: 'cancel' },
-                    {
-                        text: 'Desconectarse',
-                        style: 'destructive',
-                        onPress: async () => {
-                            setIsToggling(true);
-                            try {
-                                await finalizarTurno();
-                                useLocationStore.getState().setConnected(false);
-                                socket.disconnect();
-                                await driverApi.updateProfile({ estadoServicio: 'DESCONECTADO' });
-                            } catch (e) {
-                                console.warn('[Profile] Error al desconectar:', e);
-                            } finally {
-                                setIsToggling(false);
-                            }
-                        },
+        Alert.alert(
+            'Terminar turno',
+            'Se detendra el rastreo GPS y cerrara tu sesion. ¿Continuar?',
+            [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                    text: 'Terminar turno',
+                    style: 'destructive',
+                    onPress: async () => {
+                        setIsToggling(true);
+                        try {
+                            await stopNativeTracking();
+                            try { await driverApi.updateProfile({ estadoServicio: 'DESCONECTADO' }); } catch {}
+                            socket.disconnect();
+                            await logout();
+                        } catch (e) {
+                            console.warn('[Profile] Error al terminar turno:', e);
+                        } finally {
+                            setIsToggling(false);
+                            router.replace('/(auth)/login');
+                        }
                     },
-                ]
-            );
-        } else {
-            setIsToggling(true);
-            try {
-                // ZURI-FIX 2026-09-15: watchdog de 15s para el flujo completo — evita spinner infinito
-                const gpsOk = await Promise.race([
-                    iniciarTurno(),
-                    new Promise((res) => setTimeout(() => res(false), 15000)),
-                ]) as boolean;
-                if (!gpsOk) {
-                    try { await driverApi.updateProfile({ estadoServicio: 'DESCONECTADO' }); } catch {}
-                    Alert.alert('GPS no disponible', 'Verifica que el GPS esté activado y que la app tenga permisos de ubicación. Si el problema persiste intenta nuevamente en unos segundos.');
-                    return;
-                }
-                await driverApi.updateProfile({ estadoServicio: 'DISPONIBLE' });
-                socket.connect().then(connected => {
-                    if (connected) useLocationStore.getState().setConnected(true);
-                });
-            } catch (e) {
-                console.warn('[Profile] Error al conectar:', e);
-                try { await driverApi.updateProfile({ estadoServicio: 'DESCONECTADO' }); } catch {}
-            } finally {
-                setIsToggling(false);
-            }
-        }
+                },
+            ]
+        );
     };
 
     const handleLogout = () => {
@@ -95,7 +75,7 @@ export default function ProfileScreen() {
                             // 1. Disconnect WebSocket
                             socket.disconnect();
                             // 2. Stop GPS tracking
-                            await stopTracking();
+                            // Refactor tracking-nativo-auto: logout de auth.ts ya llama stopNativeTracking
                             // 3. Clear auth store + token
                             await logout();
                             // 4. Clear web storage (PWA)
@@ -223,18 +203,18 @@ export default function ProfileScreen() {
 
             {/* Conexión */}
             <TouchableOpacity
-                style={[styles.connectionButton, isTracking ? styles.connectionButtonOnline : styles.connectionButtonOffline]}
-                onPress={handleToggleConnection}
+                style={[styles.connectionButton, styles.connectionButtonOnline]}
+                onPress={handleEndShift}
                 disabled={isToggling}
                 activeOpacity={0.85}
             >
                 {isToggling ? (
-                    <ActivityIndicator size="small" color={isTracking ? COLORS.danger : COLORS.success} />
+                    <ActivityIndicator size="small" color={COLORS.danger} />
                 ) : (
                     <>
-                        <View style={[styles.connectionDot, isTracking ? styles.dotOnline : styles.dotOffline]} />
-                        <Text style={[styles.connectionText, isTracking ? styles.connectionTextOnline : styles.connectionTextOffline]}>
-                            {isTracking ? 'Desconectarse del servicio' : 'Conectarse al servicio'}
+                        <View style={[styles.connectionDot, styles.dotOnline]} />
+                        <Text style={[styles.connectionText, styles.connectionTextOnline]}>
+                            {'Terminar turno'}
                         </Text>
                     </>
                 )}
