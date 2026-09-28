@@ -2,7 +2,7 @@
   "expo": {
     "name": "ZURI Conductor",
     "slug": "zuri-driver-app",
-    "version": "2.0.0-alpha.2",
+    "version": "2.0.0-alpha.3",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "zuridriver",
@@ -35,7 +35,7 @@
       },
       "package": "pe.zuri.conductor",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 101,
+      "versionCode": 102,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",

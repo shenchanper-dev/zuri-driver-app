@@ -16,6 +16,8 @@ import { socket } from '@/services/socket';
 // Refactor tracking-nativo-auto: recovery del Foreground Service
 import { configureNativeTracking, startNativeTracking, getNativeTrackingState } from '@/services/nativeTracking';
 import { attachBackgroundGeolocationListener } from '@/stores/location';
+// BLOQUE 1 (2026-09-25): periodic fetch Opcion B — GPS forzado cada 60s
+import BackgroundGeolocation from 'react-native-background-geolocation';
 import { secureStorage, TOKEN_KEY } from '@/services/storage';
 
 // Unifica campos snake_case / camelCase entre WebSocket, Push y Notifee
@@ -209,6 +211,36 @@ function RootLayoutContent() {
             }
         })();
     }, [isAuthenticated, isLoading]);
+
+    // BLOQUE 1 (2026-09-25): Opcion B — periodic fetch cada 60s.
+    // Garantiza que llegue un GPS fresco al server aunque Transistorsoft este
+    // en stationary mode (que solo dispara onLocation al moverse >=10m).
+    // getCurrentPosition({persist:true}) empuja el punto por HTTP autoSync a
+    // /api/conductores/gps-tracking, y ademas dispara onLocation localmente
+    // (que a su vez actualiza el store local via onLocation listener).
+    useEffect(() => {
+        if (!isAuthenticated) return;
+        console.log('[periodic] Iniciando periodic fetch cada 60s');
+        const interval = setInterval(async () => {
+            try {
+                const location = await BackgroundGeolocation.getCurrentPosition({
+                    timeout: 30,
+                    maximumAge: 5000,
+                    persist: true,
+                    samples: 1,
+                    extras: { source: 'periodic_fetch' },
+                });
+                console.log('[periodic] GPS fresh:',
+                    location.coords.latitude, location.coords.longitude);
+            } catch (err) {
+                console.warn('[periodic] getCurrentPosition failed:', err);
+            }
+        }, 60000);
+        return () => {
+            console.log('[periodic] Deteniendo periodic fetch');
+            clearInterval(interval);
+        };
+    }, [isAuthenticated]);
 
     useEffect(() => {
         const setup = async () => {

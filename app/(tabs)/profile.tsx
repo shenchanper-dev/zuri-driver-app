@@ -13,6 +13,8 @@ import {
     Image,
     Alert,
     ActivityIndicator,
+    Modal,
+    Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -22,6 +24,7 @@ import { driverApi } from '@/services/api';
 // Refactor tracking-nativo-auto: 'Terminar turno' llama a stopNativeTracking + logout
 import { stopNativeTracking } from '@/services/nativeTracking';
 import { socket } from '@/services/socket';
+import { secureStorage, TOKEN_KEY } from '@/services/storage';
 import { COLORS, RADIUS, SHADOW } from '@/constants/theme';
 
 export default function ProfileScreen() {
@@ -29,36 +32,96 @@ export default function ProfileScreen() {
     const { conductor, logout } = useAuthStore();
     const { isTracking } = useLocationStore();
     const [isToggling, setIsToggling] = useState(false);
+    // BLOQUE 2 (2026-09-25): modal profesional post-finalizar-jornada
+    const [modalVisible, setModalVisible] = useState(false);
+    const [finalizacionHora, setFinalizacionHora] = useState('');
+    const [finalizacionFecha, setFinalizacionFecha] = useState('');
 
-    // Refactor tracking-nativo-auto: "Terminar turno" = stopNativeTracking + logout.
-    // Ya no existe "Conectarse" — estar-logueado = estar-en-linea automatico.
-    const handleEndShift = async () => {
+    // BLOQUE 2 (2026-09-25): "Finalizar jornada" — Uber-like flow.
+    // 1. Query servicios pendientes al server.
+    // 2. Alert de confirmacion con warning si N>0.
+    // 3. POST /api/v3/finalizar-jornada -> registra hora_fin_real + tipo_cierre.
+    // 4. Modal profesional bloqueante.
+    // 5. Al presionar Cerrar: stopNativeTracking + logout + navigate a login.
+    const handleFinalizarJornada = async () => {
         if (isToggling) return;
+
+        let serviciosPendientes = 0;
+        try {
+            const token = await secureStorage.getItem(TOKEN_KEY);
+            const apiBase = process.env.EXPO_PUBLIC_API_URL || 'https://admin.zuri.pe/api';
+            const res = await fetch(`${apiBase}/v3/servicios-pendientes/${conductor?.id}`, {
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (res.ok) {
+                const data = await res.json();
+                serviciosPendientes = data?.count ?? 0;
+            }
+        } catch (err) {
+            console.warn('[Profile] servicios-pendientes fetch failed:', err);
+        }
+
+        const alertMsg = serviciosPendientes > 0
+            ? `⚠️ Tienes ${serviciosPendientes} servicio${serviciosPendientes === 1 ? '' : 's'} pendiente${serviciosPendientes === 1 ? '' : 's'}.\n\nConfirma que has terminado tu jornada de hoy.`
+            : 'Confirma que has terminado tu jornada de hoy.';
+
         Alert.alert(
-            'Terminar turno',
-            'Se detendra el rastreo GPS y cerrara tu sesion. ¿Continuar?',
+            '¿Finalizar tu jornada?',
+            alertMsg,
             [
                 { text: 'Cancelar', style: 'cancel' },
                 {
-                    text: 'Terminar turno',
-                    style: 'destructive',
+                    text: 'Sí, finalicé',
                     onPress: async () => {
                         setIsToggling(true);
                         try {
-                            await stopNativeTracking();
-                            try { await driverApi.updateProfile({ estadoServicio: 'DESCONECTADO' }); } catch {}
-                            socket.disconnect();
-                            await logout();
-                        } catch (e) {
-                            console.warn('[Profile] Error al terminar turno:', e);
-                        } finally {
+                            const token = await secureStorage.getItem(TOKEN_KEY);
+                            const apiBase = process.env.EXPO_PUBLIC_API_URL || 'https://admin.zuri.pe/api';
+                            const res = await fetch(`${apiBase}/v3/finalizar-jornada`, {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    Authorization: `Bearer ${token}`,
+                                },
+                                body: JSON.stringify({
+                                    conductor_id: conductor?.id,
+                                    servicios_pendientes: serviciosPendientes,
+                                }),
+                            });
+                            const data = await res.json();
+                            if (!res.ok || !data?.success) {
+                                Alert.alert('No se pudo finalizar', data?.error ?? 'Error desconocido.');
+                                setIsToggling(false);
+                                return;
+                            }
+                            const t = new Date(data.timestamp);
+                            setFinalizacionHora(t.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }));
+                            setFinalizacionFecha(t.toLocaleDateString('es-PE', { day: '2-digit', month: '2-digit', year: 'numeric' }));
+                            setModalVisible(true);
+                        } catch (err: any) {
+                            Alert.alert('Error de red', String(err?.message ?? err));
                             setIsToggling(false);
-                            router.replace('/(auth)/login');
                         }
                     },
                 },
             ]
         );
+    };
+
+    // Modal Cerrar: stopNativeTracking + logout + navigate.
+    const handleCerrarModal = async () => {
+        try {
+            await stopNativeTracking();
+            try { await driverApi.updateProfile({ estadoServicio: 'DESCONECTADO' }); } catch {}
+            socket.disconnect();
+            await logout();
+        } catch (e) {
+            console.warn('[Profile] Error al cerrar tras finalizar:', e);
+        } finally {
+            setModalVisible(false);
+            setIsToggling(false);
+            router.replace('/(auth)/login');
+        }
     };
 
     const handleLogout = () => {
@@ -95,6 +158,7 @@ export default function ProfileScreen() {
     };
 
     return (
+        <>
         <ScrollView style={styles.container}>
             {/* Profile Header */}
             <View style={styles.header}>
@@ -201,21 +265,19 @@ export default function ProfileScreen() {
                 </TouchableOpacity>
             </View>
 
-            {/* Conexión */}
+            {/* BLOQUE 2 (2026-09-25): boton Finalizar Jornada (verde) */}
             <TouchableOpacity
-                style={[styles.connectionButton, styles.connectionButtonOnline]}
-                onPress={handleEndShift}
+                style={[styles.connectionButton, styles.finalizarButton]}
+                onPress={handleFinalizarJornada}
                 disabled={isToggling}
                 activeOpacity={0.85}
             >
                 {isToggling ? (
-                    <ActivityIndicator size="small" color={COLORS.danger} />
+                    <ActivityIndicator size="small" color="#fff" />
                 ) : (
                     <>
-                        <View style={[styles.connectionDot, styles.dotOnline]} />
-                        <Text style={[styles.connectionText, styles.connectionTextOnline]}>
-                            {'Terminar turno'}
-                        </Text>
+                        <Ionicons name="checkmark-circle" size={22} color="#fff" style={{ marginRight: 8 }} />
+                        <Text style={styles.finalizarButtonText}>Finalizar jornada</Text>
                     </>
                 )}
             </TouchableOpacity>
@@ -231,6 +293,41 @@ export default function ProfileScreen() {
                 ZURI Conductor v{Constants.expoConfig?.version ?? '1.0.5'}
             </Text>
         </ScrollView>
+
+        {/* BLOQUE 2 (2026-09-25): modal profesional post-finalizar-jornada. Bloqueante. */}
+        <Modal
+            visible={modalVisible}
+            transparent
+            animationType="fade"
+            onRequestClose={() => { /* no-op: bloqueante hasta Cerrar */ }}
+        >
+            <View style={styles.modalOverlay}>
+                <View style={styles.modalCard}>
+                    <View style={styles.modalIconWrap}>
+                        <Ionicons name="checkmark-circle" size={56} color="#10B981" />
+                    </View>
+                    <Text style={styles.modalTitle}>Jornada finalizada</Text>
+                    <Text style={styles.modalBody}>
+                        Gracias por tu colaboración y cumplimiento de jornada.
+                    </Text>
+                    <Text style={styles.modalBody}>
+                        Cualquier comunicación de parte de la administración
+                        te la haremos saber lo más pronto posible.
+                    </Text>
+                    <Text style={styles.modalFooter}>
+                        ZURI · {finalizacionFecha} · {finalizacionHora}
+                    </Text>
+                    <TouchableOpacity
+                        style={styles.modalButton}
+                        onPress={handleCerrarModal}
+                        activeOpacity={0.85}
+                    >
+                        <Text style={styles.modalButtonText}>Cerrar</Text>
+                    </TouchableOpacity>
+                </View>
+            </View>
+        </Modal>
+        </>
     );
 }
 
@@ -441,5 +538,76 @@ const styles = StyleSheet.create({
         color: COLORS.textMuted,
         marginTop: 24,
         marginBottom: 40,
+    },
+    // BLOQUE 2 finalizar
+    finalizarButton: {
+        backgroundColor: '#10B981',
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    finalizarButtonText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    // Modal profesional
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: 24,
+    },
+    modalCard: {
+        backgroundColor: '#fff',
+        borderRadius: 20,
+        padding: 28,
+        width: '100%',
+        maxWidth: 380,
+        alignItems: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.25,
+        shadowRadius: 20,
+        elevation: 10,
+    },
+    modalIconWrap: {
+        marginBottom: 16,
+    },
+    modalTitle: {
+        fontSize: 22,
+        fontWeight: '700',
+        color: '#111827',
+        marginBottom: 16,
+        textAlign: 'center',
+    },
+    modalBody: {
+        fontSize: 15,
+        color: '#374151',
+        textAlign: 'center',
+        lineHeight: 22,
+        marginBottom: 12,
+    },
+    modalFooter: {
+        fontSize: 13,
+        color: '#6B7280',
+        marginTop: 12,
+        marginBottom: 24,
+        textAlign: 'center',
+    },
+    modalButton: {
+        backgroundColor: '#10B981',
+        paddingVertical: 14,
+        paddingHorizontal: 48,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        minWidth: 160,
+    },
+    modalButtonText: {
+        color: '#fff',
+        fontSize: 16,
+        fontWeight: '600',
     },
 });
