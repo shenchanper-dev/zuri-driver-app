@@ -57,14 +57,17 @@ export default function ProfileScreen() {
                     text: 'Cerrar Sesión',
                     style: 'destructive',
                     onPress: async () => {
+                        // 1. Marcar DESCONECTADO (fire-and-forget; un timeout de red no bloquea el logout)
+                        driverApi.updateProfile({ estadoServicio: 'DESCONECTADO' })
+                            .catch(() => { /* no-op */ });
+                        // 2. Disconnect WebSocket
+                        socket.disconnect();
+                        // 3. Cambiar de pantalla de inmediato (no esperar a /revoke)
+                        router.replace('/(auth)/login');
+                        // 4. logout() sigue en segundo plano (stopAndRevoke + limpia token)
                         try {
-                            // 1. Marcar DESCONECTADO (best-effort) antes de cerrar sesión
-                            try { await driverApi.updateProfile({ estadoServicio: 'DESCONECTADO' }); } catch { /* no-op */ }
-                            // 2. Disconnect WebSocket
-                            socket.disconnect();
-                            // 3. logout de auth.ts ya hace stopAndRevoke + limpia token
                             await logout();
-                            // 4. Clear web storage (PWA)
+                            // 5. Clear web storage (PWA)
                             if (typeof window !== 'undefined') {
                                 localStorage.clear();
                                 sessionStorage.clear();
@@ -72,8 +75,6 @@ export default function ProfileScreen() {
                         } catch (e) {
                             console.error('[Logout] Error:', e);
                         }
-                        // 5. Always redirect to login
-                        router.replace('/(auth)/login');
                     },
                 },
             ]
