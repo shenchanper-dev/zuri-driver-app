@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import Constants from 'expo-constants';
 /**
  * ZURI Driver App - Profile Screen
@@ -12,53 +12,39 @@ import {
     TouchableOpacity,
     Image,
     Alert,
-    ActivityIndicator,
+    Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/auth';
-import { useLocationStore } from '@/stores/location';
-import { driverApi } from '@/services/api';
-// Refactor tracking-nativo-auto: 'Terminar turno' llama a stopNativeTracking + logout
-import { stopNativeTracking } from '@/services/nativeTracking';
+import { api, driverApi } from '@/services/api';
+import * as Traccar from 'react-native-traccar-client-sdk';
 import { socket } from '@/services/socket';
 import { COLORS, RADIUS, SHADOW } from '@/constants/theme';
 
 export default function ProfileScreen() {
     const router = useRouter();
     const { conductor, logout } = useAuthStore();
-    const { isTracking } = useLocationStore();
-    const [isToggling, setIsToggling] = useState(false);
 
-    // Refactor tracking-nativo-auto: "Terminar turno" = stopNativeTracking + logout.
-    // Ya no existe "Conectarse" — estar-logueado = estar-en-linea automatico.
-    const handleEndShift = async () => {
-        if (isToggling) return;
-        Alert.alert(
-            'Terminar turno',
-            'Se detendra el rastreo GPS y cerrara tu sesion. ¿Continuar?',
-            [
-                { text: 'Cancelar', style: 'cancel' },
-                {
-                    text: 'Terminar turno',
-                    style: 'destructive',
-                    onPress: async () => {
-                        setIsToggling(true);
-                        try {
-                            await stopNativeTracking();
-                            try { await driverApi.updateProfile({ estadoServicio: 'DESCONECTADO' }); } catch {}
-                            socket.disconnect();
-                            await logout();
-                        } catch (e) {
-                            console.warn('[Profile] Error al terminar turno:', e);
-                        } finally {
-                            setIsToggling(false);
-                            router.replace('/(auth)/login');
-                        }
-                    },
-                },
-            ]
-        );
+    // Regla 7 (instrumentación): long-press 2.5s en el avatar -> sube getLogs() del SDK.
+    const enviarDiagnostico = async () => {
+        try {
+            const logs = await Traccar.getLogs(); // LogEntry { time:number; message:string }
+            const text = logs
+                .map((l) => `${new Date(l.time).toISOString()} ${l.message}`)
+                .join('\n')
+                .slice(0, 200 * 1024); // app trunca a 200KB; server a 256KB
+            const r = await api.authPost('/v3/device-diagnostics', {
+                conductorId: conductor?.id,          // DEBE coincidir con el token (403 si no)
+                versionName: Constants.expoConfig?.version ?? null,
+                platform: Platform.OS,
+                capturedAt: new Date().toISOString(),
+                log: text || '(sin logs)',
+            });
+            Alert.alert('Diagnóstico', r.success ? `Enviado (id ${r.id})` : `Error: ${r.error}`);
+        } catch (e: any) {
+            Alert.alert('Diagnóstico', `Fallo: ${e?.message ?? e}`);
+        }
     };
 
     const handleLogout = () => {
@@ -72,11 +58,11 @@ export default function ProfileScreen() {
                     style: 'destructive',
                     onPress: async () => {
                         try {
-                            // 1. Disconnect WebSocket
+                            // 1. Marcar DESCONECTADO (best-effort) antes de cerrar sesión
+                            try { await driverApi.updateProfile({ estadoServicio: 'DESCONECTADO' }); } catch { /* no-op */ }
+                            // 2. Disconnect WebSocket
                             socket.disconnect();
-                            // 2. Stop GPS tracking
-                            // Refactor tracking-nativo-auto: logout de auth.ts ya llama stopNativeTracking
-                            // 3. Clear auth store + token
+                            // 3. logout de auth.ts ya hace stopAndRevoke + limpia token
                             await logout();
                             // 4. Clear web storage (PWA)
                             if (typeof window !== 'undefined') {
@@ -98,21 +84,23 @@ export default function ProfileScreen() {
         <ScrollView style={styles.container}>
             {/* Profile Header */}
             <View style={styles.header}>
-                <View style={styles.avatarContainer}>
-                    {conductor?.foto ? (
-                        <Image source={{ uri: conductor.foto }} style={styles.avatar} />
-                    ) : (
-                        <View style={styles.avatarPlaceholder}>
-                            <Text style={styles.avatarText}>
-                                {conductor?.nombres?.charAt(0) || 'C'}
-                                {conductor?.apellidos?.charAt(0) || ''}
-                            </Text>
-                        </View>
-                    )}
-                    <TouchableOpacity style={styles.editAvatarButton}>
-                        <Ionicons name="camera" size={16} color="#fff" />
-                    </TouchableOpacity>
-                </View>
+                <TouchableOpacity activeOpacity={0.9} onLongPress={enviarDiagnostico} delayLongPress={2500}>
+                    <View style={styles.avatarContainer}>
+                        {conductor?.foto ? (
+                            <Image source={{ uri: conductor.foto }} style={styles.avatar} />
+                        ) : (
+                            <View style={styles.avatarPlaceholder}>
+                                <Text style={styles.avatarText}>
+                                    {conductor?.nombres?.charAt(0) || 'C'}
+                                    {conductor?.apellidos?.charAt(0) || ''}
+                                </Text>
+                            </View>
+                        )}
+                        <TouchableOpacity style={styles.editAvatarButton}>
+                            <Ionicons name="camera" size={16} color="#fff" />
+                        </TouchableOpacity>
+                    </View>
+                </TouchableOpacity>
 
                 <Text style={styles.name}>
                     {conductor?.nombreCompleto || `${conductor?.nombres} ${conductor?.apellidos}`}
@@ -200,25 +188,6 @@ export default function ProfileScreen() {
                     <Ionicons name="chevron-forward" size={20} color="#ccc" />
                 </TouchableOpacity>
             </View>
-
-            {/* Conexión */}
-            <TouchableOpacity
-                style={[styles.connectionButton, styles.connectionButtonOnline]}
-                onPress={handleEndShift}
-                disabled={isToggling}
-                activeOpacity={0.85}
-            >
-                {isToggling ? (
-                    <ActivityIndicator size="small" color={COLORS.danger} />
-                ) : (
-                    <>
-                        <View style={[styles.connectionDot, styles.dotOnline]} />
-                        <Text style={[styles.connectionText, styles.connectionTextOnline]}>
-                            {'Terminar turno'}
-                        </Text>
-                    </>
-                )}
-            </TouchableOpacity>
 
             {/* Logout */}
             <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
@@ -387,44 +356,12 @@ const styles = StyleSheet.create({
         fontSize: 12,
         color: COLORS.info,
     },
-    connectionButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 10,
-        marginTop: 24,
-        marginHorizontal: 16,
-        paddingVertical: 14,
-        borderRadius: RADIUS.md,
-        borderWidth: 1.5,
-    },
-    connectionButtonOnline: {
-        backgroundColor: '#FFF5F5',
-        borderColor: '#FCA5A5',
-    },
-    connectionButtonOffline: {
-        backgroundColor: '#F0FDF4',
-        borderColor: '#86EFAC',
-    },
-    connectionDot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-    },
-    dotOnline: { backgroundColor: '#22C55E' },
-    dotOffline: { backgroundColor: '#9CA3AF' },
-    connectionText: {
-        fontSize: 15,
-        fontWeight: '600',
-    },
-    connectionTextOnline: { color: '#EF4444' },
-    connectionTextOffline: { color: '#16A34A' },
     logoutButton: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 8,
-        marginTop: 12,
+        marginTop: 24,
         marginHorizontal: 16,
         paddingVertical: 16,
         backgroundColor: '#FFEBE6',

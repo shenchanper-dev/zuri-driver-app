@@ -77,7 +77,8 @@ class ApiClient {
                 return {
                     success: false,
                     error: data.error || `Error ${response.status}`,
-                    ...data
+                    ...data,
+                    httpStatus: response.status,
                 };
             }
 
@@ -87,12 +88,13 @@ class ApiClient {
             clearTimeout(timeoutId);
 
             if (error.name === 'AbortError') {
-                return { success: false, error: 'Tiempo de espera agotado' };
+                return { success: false, error: 'Tiempo de espera agotado', httpStatus: 0 };
             }
 
             return {
                 success: false,
-                error: error.message || 'Error de conexión'
+                error: error.message || 'Error de conexión',
+                httpStatus: 0,
             };
         }
     }

@@ -2,7 +2,7 @@
   "expo": {
     "name": "ZURI Conductor",
     "slug": "zuri-driver-app",
-    "version": "2.0.0-alpha.2",
+    "version": "2.0.0-alpha.5",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "scheme": "zuridriver",
@@ -35,7 +35,6 @@
       },
       "package": "pe.zuri.conductor",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 101,
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -45,6 +44,7 @@
         "WAKE_LOCK",
         "RECEIVE_BOOT_COMPLETED",
         "POST_NOTIFICATIONS",
+        "ACTIVITY_RECOGNITION",
         "VIBRATE",
         "USE_BIOMETRIC",
         "USE_FINGERPRINT",
@@ -84,12 +84,6 @@
         }
       ],
       "expo-task-manager",
-      [
-        "react-native-background-geolocation",
-        {
-          "license": "eyJhbGciOiJFZERTQSIsImtpZCI6ImVkMjU1MTktbWFpbi12MSJ9.eyJvcyI6ImFuZHJvaWQiLCJhcHBfaWQiOiJwZS56dXJpLmNvbmR1Y3RvciIsIm9yZGVyX251bWJlciI6IiIsInJlbmV3YWxfdXJsIjoiIiwiY3VzdG9tZXJfaWQiOiIiLCJwcm9kdWN0IjoicmVhY3QtbmF0aXZlLWJhY2tncm91bmQtZ2VvbG9jYXRpb24iLCJrZXlfdmVyc2lvbiI6MSwiYWxsb3dlZF9zdWZmaXhlcyI6WyIuZGV2IiwiLmRldmVsb3BtZW50IiwiLnN0YWdpbmciLCIuc3RhZ2UiLCIucWEiLCIudWF0IiwiLnRlc3QiLCIuZGVidWciXSwibWF4X2J1aWxkX3N0YW1wIjoyMDI2MTAxOSwiZ3JhY2VfYnVpbGRzIjowLCJlbnRpdGxlbWVudHMiOlsiY29yZSIsInBvbHlnb24tZ2VvZmVuY2luZyJdLCJpYXQiOjE3ODk3ODIyMzIsImV4cCI6MTc5MjM3NDIzMiwidHJpYWwiOnRydWUsInRyaWFsX2RheXMiOjMwfQ.JHsWifYqjy06oVfnRyMj4Hoj8bipRU3RMZgx4WP0I_SFxx1LoE8Ztsguq_G_kJrBPTHiir63zhKG4tZuVEVoDw"
-        }
-      ],
       [
         "expo-local-authentication",
         {

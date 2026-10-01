@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import {
     View, Text, StyleSheet, TouchableOpacity,
-    Alert, StatusBar, Platform, Modal,
+    Alert, StatusBar, Platform, Modal, Linking, PermissionsAndroid, AppState,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useAuthStore } from '@/stores/auth';
@@ -13,26 +13,27 @@ import { MapaDriver, MapaDriverRef } from '@/components/MapaDriver';
 import { HomeBottomSheet } from '@/components/HomeBottomSheet';
 import { ChatScreen } from '@/components/ChatScreen';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
-// Refactor tracking-nativo-auto: nativeTracking se gestiona desde _layout.tsx
+import { useDriverLocation } from '@/hooks/useDriverLocation';
+import { isActive as trackingIsActive, restart } from '@/services/traccarTracking';
 
 export default function HomeScreen() {
     const router = useRouter();
     const { conductor } = useAuthStore();
     usePushNotifications(conductor?.id);
 
-    // Refactor tracking-nativo-auto: configureNativeTracking ahora vive en _layout.tsx
-    const {
-        isTracking,
-        isConnected, currentLocation,
-    } = useLocationStore();
+    // currentLocation lo alimenta useDriverLocation (expo-location, solo mapa).
+    const { currentLocation } = useLocationStore();
+    useDriverLocation();
+
+    // Estado "En linea" real = SDK Traccar (foreground service). NO flag local.
+    const [online, setOnline] = useState(false);
+    const [arDenied, setArDenied] = useState(false);
 
     const mapRef = useRef<MapaDriverRef>(null);
-    const isOnline = isTracking;
+    const isOnline = online;
     const [isToggling, setIsToggling]           = useState(false);
     const [serviciosResumen, setServiciosResumen] = useState({ pendientes: 0, activos: 0 });
     const [servicioActivoId, setServicioActivoId] = useState<number | null>(null);
-    // Banner GPS: en turno pero sin GPS (apagado o sin permiso). Modelo Uber "Waiting for GPS".
-    const [gpsWarning, setGpsWarning] = useState(false);
     const [chatOpen, setChatOpen]               = useState(false);
 
     // ── Load service counters ─────────────────────────────────────────────────
@@ -79,16 +80,8 @@ export default function HomeScreen() {
         }
     }, [router]);
 
-    // Refactor tracking-nativo-auto: handleToggleStatus ELIMINADO.
-    // Estar-logueado = estar-en-linea. Sin boton "Conectarse".
-
     // Mount: connect socket, load counters
-    // Refactor tracking-nativo-auto: el arranque del tracking se hace en _layout.tsx
-    // (recovery post-sesion). Aca solo conectamos socket + refrescamos contadores.
     useEffect(() => {
-        // Refactor tracking-nativo-auto: _layout ya hace recovery.
-        // Aqui solo conectamos socket + refrescamos contadores.
-
         if (conductor?.id) {
             socket.setDriverId(conductor.id);
             socket.connect().then(connected => {
@@ -133,19 +126,31 @@ export default function HomeScreen() {
         }
     }, [currentLocation, servicioActivoId]);
 
-    // Refactor tracking-nativo-auto: GPS watchdog usa BackgroundGeolocation.getProviderState()
+    // ── Chip "En linea": refleja isActive() real del SDK (poll + al volver a foreground) ──
     useEffect(() => {
-        let cancelled = false;
+        let cancel = false;
+        const tick = async () => { const a = await trackingIsActive(); if (!cancel) setOnline(a); };
+        tick();
+        const iv = setInterval(tick, 10000);
+        const sub = AppState.addEventListener('change', (st) => { if (st === 'active') tick(); });
+        return () => { cancel = true; clearInterval(iv); sub.remove(); };
+    }, []);
+
+    // ── Aviso ACTIVITY_RECOGNITION denegado (SOLO check, nunca request; Android 10+/API29) ──
+    useEffect(() => {
+        if (Platform.OS !== 'android') return;
+        if (typeof Platform.Version === 'number' && Platform.Version < 29) return;
+        let cancel = false;
         const check = async () => {
             try {
-                const BG = (await import('react-native-background-geolocation')).default;
-                const st: any = await BG.getProviderState();
-                if (!cancelled) setGpsWarning(!st?.enabled || (st?.status !== 3 && st?.status !== undefined));
+                const granted = await PermissionsAndroid.check(
+                    PermissionsAndroid.PERMISSIONS.ACTIVITY_RECOGNITION);
+                if (!cancel) setArDenied(!granted);
             } catch { /* no-op */ }
         };
         check();
-        const iv = setInterval(check, 15000);
-        return () => { cancelled = true; clearInterval(iv); };
+        const sub = AppState.addEventListener('change', (st) => { if (st === 'active') check(); });
+        return () => { cancel = true; sub.remove(); };
     }, []);
 
     // ── Derived display values ────────────────────────────────────────────────
@@ -181,29 +186,47 @@ export default function HomeScreen() {
                 </View>
             </View>
 
-            {/* BANNER GPS: en turno pero sin GPS (apagado / sin permiso) */}
-            {gpsWarning && (
-                <TouchableOpacity
-                    style={s.gpsBanner}
-                    activeOpacity={0.85}
-                    onPress={async () => {
-                        const BG = (await import('react-native-background-geolocation')).default;
-                        const provider: any = await BG.getProviderState().catch(() => null);
-                        if (!provider?.enabled) {
-                            Alert.alert(
-                                'GPS desactivado',
-                                'Activa la ubicacion (GPS) de tu telefono para poder recibir servicios.'
-                            );
-                        } else {
-                            const status = await BG.requestPermission().catch(() => 0);
-                            // 3 = ALWAYS granted en el enum de Transistorsoft
-                            if (status === 3) setGpsWarning(false);
-                        }
-                    }}
-                >
-                    <Text style={s.gpsBannerIcon}>📡</Text>
-                    <Text style={s.gpsBannerTx}>GPS desactivado — actívalo para recibir servicios</Text>
+            {/* CHIP DE ESTADO + (solo si !online) boton Reconectar. alpha.5: sin "Finalizar jornada". */}
+            <View style={s.statusChipRow} pointerEvents="box-none">
+                <View style={[s.statusChip, isOnline ? s.chipOnline : s.chipOffline]}>
+                    <View style={[s.statusDot, isOnline ? s.dotOn : s.dotOff]} />
+                    <Text style={s.statusTx}>{isOnline ? 'En línea' : 'Desconectado'}</Text>
+                </View>
+                {!isOnline && (
+                    <TouchableOpacity
+                        style={[s.statusAction, s.actionReconnect]}
+                        disabled={isToggling}
+                        onPress={() => {
+                            (async () => {
+                                setIsToggling(true);
+                                try {
+                                    const r = await restart();
+                                    if (r === 'started') setOnline(true);
+                                    else if (r === 'needs-login') router.replace('/(auth)/login');
+                                    else Alert.alert('Sin conexión', 'No se pudo reconectar. Reintenta.');
+                                } finally { setIsToggling(false); }
+                            })();
+                        }}
+                    >
+                        <Text style={s.statusActionTx}>Reconectar</Text>
+                    </TouchableOpacity>
+                )}
+            </View>
+
+            {/* BANNER ACTIVITY_RECOGNITION denegado (no altera el chip) */}
+            {arDenied && (
+                <TouchableOpacity style={s.arBanner} activeOpacity={0.85} onPress={() => Linking.openSettings()}>
+                    <Text style={s.arBannerTx}>
+                        Activa "Actividad física" para que ZURI funcione con el auto detenido
+                    </Text>
                 </TouchableOpacity>
+            )}
+
+            {/* "Ubicando…" NO bloqueante hasta la primera posición */}
+            {!currentLocation && (
+                <View style={s.locating} pointerEvents="none">
+                    <Text style={s.locatingTx}>Ubicando…</Text>
+                </View>
             )}
 
             {/* FAB recentrar */}
@@ -258,8 +281,6 @@ const s = StyleSheet.create({
         flex: 1,
         backgroundColor: '#1F2937',
     },
-
-    // Floating header card
     headerCard: {
         position: 'absolute',
         top: 0, left: 0, right: 0,
@@ -298,8 +319,6 @@ const s = StyleSheet.create({
         fontSize: FONT.sizes.base,
         fontWeight: FONT.weights.bold,
     },
-
-    // FAB recentrar
     fab: {
         position: 'absolute',
         right: SPACING[4],
@@ -313,23 +332,70 @@ const s = StyleSheet.create({
         ...SHADOW.elevated,
     },
     fabIcon: { fontSize: 20 },
-    gpsBanner: {
+
+    // Chip de estado + accion
+    statusChipRow: {
         position: 'absolute',
         top: Platform.OS === 'web' ? 70 : 104,
         left: SPACING[4],
         right: SPACING[4],
-        backgroundColor: '#F59E0B',
-        borderRadius: RADIUS.md,
-        paddingVertical: 10,
-        paddingHorizontal: 14,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 8,
+        zIndex: 20,
+    },
+    statusChip: {
         flexDirection: 'row',
         alignItems: 'center',
         gap: 8,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
+        borderRadius: RADIUS.pill,
+        ...SHADOW.elevated,
+    },
+    chipOnline: { backgroundColor: '#ECFDF5', borderWidth: 1, borderColor: '#A7F3D0' },
+    chipOffline: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA' },
+    statusDot: { width: 10, height: 10, borderRadius: 5 },
+    dotOn: { backgroundColor: '#22C55E' },
+    dotOff: { backgroundColor: '#9CA3AF' },
+    statusTx: { fontSize: 13, fontWeight: '700', color: COLORS.textPrimary },
+    statusAction: {
+        paddingHorizontal: 14,
+        paddingVertical: 8,
+        borderRadius: RADIUS.pill,
+        ...SHADOW.elevated,
+    },
+    actionReconnect: { backgroundColor: COLORS.primary },
+    statusActionTx: { color: '#fff', fontSize: 13, fontWeight: '700' },
+
+    // Banner ACTIVITY_RECOGNITION
+    arBanner: {
+        position: 'absolute',
+        top: Platform.OS === 'web' ? 118 : 152,
+        left: SPACING[4],
+        right: SPACING[4],
+        backgroundColor: '#DC2626',
+        borderRadius: RADIUS.md,
+        paddingVertical: 10,
+        paddingHorizontal: 14,
         zIndex: 20,
         ...SHADOW.elevated,
     },
-    gpsBannerIcon: { fontSize: 16 },
-    gpsBannerTx: { flex: 1, color: '#fff', fontSize: 13, fontWeight: '700' },
+    arBannerTx: { color: '#fff', fontSize: 13, fontWeight: '700' },
+
+    // "Ubicando…" no bloqueante
+    locating: {
+        position: 'absolute',
+        bottom: 300,
+        alignSelf: 'center',
+        backgroundColor: 'rgba(31,41,55,0.85)',
+        paddingHorizontal: 14,
+        paddingVertical: 6,
+        borderRadius: RADIUS.pill,
+        zIndex: 15,
+    },
+    locatingTx: { color: '#fff', fontSize: 12, fontWeight: '600' },
 });
 
 // Web-only override applied inline — keeps StyleSheet types clean

@@ -1,104 +1,89 @@
 /**
- * ZURI Driver App — useDriverLocation hook
- *
- * REFACTOR 2026-09-18: ahora usa react-native-background-geolocation
- * (Transistorsoft) en vez de expo-location. Compat con la API vieja
- * para no romper consumers.
- *
- * En native: consume BackgroundGeolocation.onLocation.
- * En web: fallback a navigator.geolocation (para preview del mapa).
+ * useDriverLocation (NUEVO) — expo-location SOLO para currentLocation del mapa
+ * (centrado + polilinea en index.tsx). Aislado: alimenta UNICAMENTE
+ * store.updateLocation; NO toca el chip (isTracking real vive en el SDK).
+ * NO pide permisos (solo getForegroundPermissionsAsync).
  */
+import { useEffect, useRef } from 'react';
+import { AppState, AppStateStatus, Platform } from 'react-native';
+import { useLocationStore } from '@/stores/location';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { Platform } from 'react-native';
-
-export interface DriverLocationData {
-    latitude: number;
-    longitude: number;
-    heading?: number;
-    speed?: number;
-    accuracy?: number;
-    timestamp: number;
+function raceTimeout<T>(p: Promise<T>, ms: number): Promise<T | null> {
+  return Promise.race([p, new Promise<null>((r) => setTimeout(() => r(null), ms))]);
 }
 
-export interface UseDriverLocationReturn {
-    location: DriverLocationData | null;
-    error: string | null;
-    isTracking: boolean;
-    startTracking: () => Promise<void>;
-    stopTracking: () => void;
-}
+export function useDriverLocation() {
+  const update = useLocationStore((s) => s.updateLocation);
+  const subRef = useRef<any>(null);
+  const webIdRef = useRef<number | null>(null);
+  const startingRef = useRef(false);
 
-export function useDriverLocation(): UseDriverLocationReturn {
-    const [location, setLocation] = useState<DriverLocationData | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [isTracking, setIsTracking] = useState(false);
-    const subscriberRef = useRef<any>(null);
-    const webWatchRef = useRef<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
 
-    const stopTracking = useCallback(() => {
+    const feed = (loc: any) => update({
+      latitude: loc.coords.latitude,
+      longitude: loc.coords.longitude,
+      heading: loc.coords.heading ?? undefined,
+      speed: loc.coords.speed ?? undefined,
+      accuracy: loc.coords.accuracy ?? undefined,
+      timestamp: new Date(loc.timestamp ?? Date.now()).toISOString(),
+    });
+
+    const stop = () => {
+      try { subRef.current?.remove?.(); } catch { /* no-op */ }
+      subRef.current = null;
+      if (webIdRef.current != null && typeof navigator !== 'undefined' && navigator.geolocation) {
+        navigator.geolocation.clearWatch(webIdRef.current);
+        webIdRef.current = null;
+      }
+    };
+
+    const active = () => !cancelled && AppState.currentState === 'active';
+
+    const start = async () => {
+      if (startingRef.current || subRef.current) return;
+      startingRef.current = true;
+      try {
         if (Platform.OS === 'web') {
-            if (webWatchRef.current != null && typeof navigator !== 'undefined' && navigator.geolocation) {
-                navigator.geolocation.clearWatch(webWatchRef.current);
-                webWatchRef.current = null;
-            }
-        } else {
-            if (subscriberRef.current?.remove) {
-                subscriberRef.current.remove();
-            }
-            subscriberRef.current = null;
+          if (typeof navigator === 'undefined' || !navigator.geolocation || webIdRef.current != null) return;
+          webIdRef.current = navigator.geolocation.watchPosition(
+            (p) => feed(p), () => { /* no-op */ },
+            { enableHighAccuracy: false, maximumAge: 5000, timeout: 8000 },
+          );
+          return;
         }
-        setIsTracking(false);
-    }, []);
+        const Location = await import('expo-location');
+        if (!active()) return;
+        const { status } = await Location.getForegroundPermissionsAsync(); // SOLO check, nunca request
+        if (!active() || status !== 'granted') return;
+        // fix inicial NO bloqueante (timeout 8s); si no llega, el watch lo llena
+        const first = await raceTimeout(
+          Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }), 8000,
+        );
+        if (!active()) return;
+        if (first) feed(first);
+        const sub = await Location.watchPositionAsync(
+          { accuracy: Location.Accuracy.Balanced, timeInterval: 5000, distanceInterval: 10 },
+          (loc) => feed(loc),
+        );
+        if (!active()) { try { sub.remove(); } catch { /* no-op */ } return; }
+        subRef.current = sub;
+      } finally {
+        startingRef.current = false;
+      }
+    };
 
-    const startTracking = useCallback(async () => {
-        if (Platform.OS === 'web') {
-            if (typeof navigator === 'undefined' || !navigator.geolocation) {
-                setError('Geolocation no soportado en este navegador');
-                return;
-            }
-            if (webWatchRef.current != null) return;
-            webWatchRef.current = navigator.geolocation.watchPosition(
-                (pos) => {
-                    setLocation({
-                        latitude: pos.coords.latitude,
-                        longitude: pos.coords.longitude,
-                        heading: pos.coords.heading ?? undefined,
-                        speed: pos.coords.speed ?? undefined,
-                        accuracy: pos.coords.accuracy ?? undefined,
-                        timestamp: pos.timestamp,
-                    });
-                    setError(null);
-                },
-                (err) => setError(err.message),
-                { enableHighAccuracy: true, timeout: 15000, maximumAge: 5000 }
-            );
-            setIsTracking(true);
-            return;
-        }
+    start();
 
-        // Native: suscribirse al onLocation de BackgroundGeolocation
-        if (subscriberRef.current) return;
-        const BackgroundGeolocation = (await import('react-native-background-geolocation')).default;
-        subscriberRef.current = BackgroundGeolocation.onLocation((loc: any) => {
-            setLocation({
-                latitude: loc.coords.latitude,
-                longitude: loc.coords.longitude,
-                heading: loc.coords.heading ?? undefined,
-                speed: loc.coords.speed ?? undefined,
-                accuracy: loc.coords.accuracy ?? undefined,
-                timestamp: new Date(loc.timestamp).getTime(),
-            });
-            setError(null);
-        }, (errCode: number) => {
-            setError(`GPS error code ${errCode}`);
-        });
-        setIsTracking(true);
-    }, []);
+    const onAppState = (st: AppStateStatus) => {
+      if (st === 'active') start();
+      else stop(); // background/inactive -> desuscribe (el SDK nativo sigue en bg)
+    };
+    const appSub = AppState.addEventListener('change', onAppState);
 
-    useEffect(() => () => stopTracking(), [stopTracking]);
-
-    return { location, error, isTracking, startTracking, stopTracking };
+    return () => { cancelled = true; stop(); appSub.remove(); };
+  }, [update]);
 }
 
 export default useDriverLocation;

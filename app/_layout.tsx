@@ -13,9 +13,8 @@ import { setupNotificationChannel, setupNotificationListeners, setForegroundNoti
 import { NuevoServicioPopup } from '@/components/NuevoServicioPopup';
 import notifee, { EventType } from '@notifee/react-native';
 import { socket } from '@/services/socket';
-// Refactor tracking-nativo-auto: recovery del Foreground Service
-import { configureNativeTracking, startNativeTracking, getNativeTrackingState } from '@/services/nativeTracking';
-import { attachBackgroundGeolocationListener } from '@/stores/location';
+// Migracion Traccar: recovery del tracking segun device_token (Apendice B)
+import { resumeTracking, issueTokenAndStart, getDeviceToken, isActive } from '@/services/traccarTracking';
 import { secureStorage, TOKEN_KEY } from '@/services/storage';
 
 // Unifica campos snake_case / camelCase entre WebSocket, Push y Notifee
@@ -113,7 +112,7 @@ function RootLayoutContent() {
 
     const initialize = useCallback(async () => {
         let isMounted = true;
-        let timeoutId: number;
+        let timeoutId: ReturnType<typeof setTimeout>;
 
 
         setIsLoading(true);
@@ -181,31 +180,26 @@ function RootLayoutContent() {
         initialize();
     }, []);
 
-    // Refactor tracking-nativo-auto: recovery del Foreground Service.
-    // Si la app arranca con sesion valida (cold-start desde recientes, o post-boot),
-    // reanudar tracking. stopOnTerminate:false + startOnBoot:true en Transistorsoft
-    // significa que el service ya deberia estar vivo — solo aseguramos config sync.
-    useEffect(() => {
-        attachBackgroundGeolocationListener();
-    }, []);
+    // Migracion Traccar: recovery del tracking en cold-start (Apendice B).
+    // Si hay sesion valida, se reanuda via device_token (resumeTracking) o se
+    // emite uno nuevo (issueTokenAndStart). El ForegroundService del SDK sobrevive
+    // OS-kill/reboot (BootReceiver); aqui solo aseguramos que este activo.
     useEffect(() => {
         if (isLoading || !isAuthenticated) return;
         const { conductor } = useAuthStore.getState();
         if (!conductor?.id) return;
         (async () => {
             try {
-                const token = await secureStorage.getItem(TOKEN_KEY);
-                if (!token) return;
-                await configureNativeTracking(conductor.id, token);
-                const state = await getNativeTrackingState();
-                if (!state.enabled) {
-                    await startNativeTracking();
-                    console.log('[_layout] nativeTracking auto-arrancado por sesion valida');
-                } else {
-                    console.log('[_layout] nativeTracking ya estaba corriendo (recovery)');
+                if (await isActive()) return; // ya corriendo -> nada (evita carrera con login)
+                if (await getDeviceToken()) {
+                    await resumeTracking();
+                    console.log('[_layout] resumeTracking (device_token presente)');
+                } else if (await secureStorage.getItem(TOKEN_KEY)) {
+                    const r = await issueTokenAndStart(); // single-flight con login
+                    console.log('[_layout] issueTokenAndStart:', r.ok);
                 }
             } catch (err: any) {
-                console.warn('[_layout] recovery nativeTracking fallo:', err?.message);
+                console.warn('[_layout] recovery tracking fallo:', err?.message);
             }
         })();
     }, [isAuthenticated, isLoading]);

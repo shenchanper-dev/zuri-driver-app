@@ -8,7 +8,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 // Refactor tracking-nativo-auto: arrancar Foreground Service post-login
-import { configureNativeTracking, startNativeTracking, stopNativeTracking } from '@/services/nativeTracking';
+import { issueTokenAndStart, stopAndRevoke } from '@/services/traccarTracking';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { api } from '@/services/api';
 import { secureStorage, TOKEN_KEY } from '@/services/storage';
@@ -142,13 +142,12 @@ export const useAuthStore = create<AuthState>()(
                             error: null
                         });
 
-                        // Refactor tracking-nativo-auto: arrancar Foreground Service post-login PIN
+                        // Migracion Traccar: emitir device_token y arrancar tracking post-login PIN
                         try {
-                            await configureNativeTracking(response.conductor.id, response.token);
-                            await startNativeTracking();
-                            console.log('[AuthStore] nativeTracking arrancado post-login-PIN');
+                            await issueTokenAndStart();
+                            console.log('[AuthStore] tracking (device_token) arrancado post-login-PIN');
                         } catch (trackErr) {
-                            console.warn('[AuthStore] nativeTracking start post-PIN fallo:', trackErr);
+                            console.warn('[AuthStore] issueTokenAndStart post-PIN fallo:', trackErr);
                         }
 
                         return true;
@@ -229,16 +228,12 @@ export const useAuthStore = create<AuthState>()(
                             error: null
                         });
 
-                        // Refactor tracking-nativo-auto: arrancar Foreground Service post-biometrics
+                        // Migracion Traccar: emitir device_token y arrancar tracking post-biometrics
                         try {
-                            const bioToken = await secureStorage.getItem(TOKEN_KEY);
-                            if (bioToken && response.conductor?.id) {
-                                await configureNativeTracking(response.conductor.id, bioToken);
-                                await startNativeTracking();
-                                console.log('[AuthStore] nativeTracking arrancado post-biometrics');
-                            }
+                            await issueTokenAndStart();
+                            console.log('[AuthStore] tracking arrancado post-biometrics');
                         } catch (trackErr) {
-                            console.warn('[AuthStore] nativeTracking start post-bio fallo:', trackErr);
+                            console.warn('[AuthStore] issueTokenAndStart post-bio fallo:', trackErr);
                         }
 
                         return true;
@@ -356,7 +351,7 @@ export const useAuthStore = create<AuthState>()(
             // ========================================
             logout: async () => {
                 // Refactor tracking-nativo-auto: parar Foreground Service antes de limpiar sesion
-                try { await stopNativeTracking(); } catch (e) { console.warn('[AuthStore] stopNativeTracking en logout:', e); }
+                try { await stopAndRevoke(); } catch (e) { console.warn('[AuthStore] stopAndRevoke en logout:', e); }
                 await secureStorage.deleteItem(TOKEN_KEY);
                 // ZURI-FIX 2026-09-15: limpiar AsyncStorage residual (turno activo, GPS queue)
                 // para que la siguiente sesion de otro conductor no herede estado.
