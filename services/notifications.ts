@@ -1,6 +1,15 @@
 import * as Device from 'expo-device';
 import { Platform } from 'react-native';
-import messaging from '@react-native-firebase/messaging';
+import {
+    getMessaging,
+    getToken,
+    requestPermission,
+    onMessage,
+    onTokenRefresh,
+    setBackgroundMessageHandler,
+    AuthorizationStatus,
+} from '@react-native-firebase/messaging';
+import type { RemoteMessage } from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, AndroidVisibility, AndroidCategory } from '@notifee/react-native';
 import { driverApi } from './api';
 
@@ -17,7 +26,9 @@ export function setForegroundNotificationCallback(cb: ForegroundNotificationCall
 }
 
 // ── FCM background handler (top-level, fuera de componentes) ─────────
-messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+const msg = getMessaging();
+
+setBackgroundMessageHandler(msg, async (remoteMessage: RemoteMessage) => {
     console.log('[zuri:fcm] Background message:', remoteMessage.messageId);
     const data = remoteMessage.data as Record<string, any> | undefined;
     if (!data) return;
@@ -104,10 +115,10 @@ export async function registerForFcmPushNotifications(): Promise<string | null> 
             return null;
         }
 
-        const authStatus = await messaging().requestPermission();
+        const authStatus = await requestPermission(msg);
         const enabled =
-            authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
-            authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+            authStatus === AuthorizationStatus.AUTHORIZED ||
+            authStatus === AuthorizationStatus.PROVISIONAL;
 
         if (!enabled) {
             console.warn('[zuri:fcm] Push permission denied');
@@ -119,7 +130,7 @@ export async function registerForFcmPushNotifications(): Promise<string | null> 
             catch (e) { console.warn('[zuri:fcm] Notifee permission request failed:', e); }
         }
 
-        const fcmToken = await messaging().getToken();
+        const fcmToken = await getToken(msg);
         console.log('[zuri:fcm] Got FCM token:', fcmToken.substring(0, 20) + '...');
 
         try {
@@ -129,7 +140,7 @@ export async function registerForFcmPushNotifications(): Promise<string | null> 
             console.error('[zuri:fcm] Failed to register FCM token:', error);
         }
 
-        messaging().onTokenRefresh(async (newToken) => {
+        onTokenRefresh(msg, async (newToken: string) => {
             console.log('[zuri:fcm] Token refreshed:', newToken.substring(0, 20) + '...');
             try { await driverApi.registerPushToken(newToken); }
             catch (e) { console.warn('[zuri:fcm] Token refresh register failed:', e); }
@@ -143,7 +154,7 @@ export async function registerForFcmPushNotifications(): Promise<string | null> 
 }
 
 export function setupFcmForegroundListener(): () => void {
-    const unsubscribe = messaging().onMessage(async (remoteMessage) => {
+    const unsubscribe = onMessage(msg, async (remoteMessage: RemoteMessage) => {
         console.log('[zuri:fcm] Foreground message:', remoteMessage.messageId);
         const data = remoteMessage.data as Record<string, any> | undefined;
         if (!data) return;
