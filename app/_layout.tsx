@@ -9,12 +9,12 @@ import { StatusBar } from 'expo-status-bar';
 import { View, ActivityIndicator, StyleSheet, Text, TouchableOpacity, Platform, AppState, AppStateStatus } from 'react-native';
 import { useAuthStore } from '@/stores/auth';
 import { Ionicons } from '@expo/vector-icons';
-import { setupNotificationChannel, setupNotificationListeners, setForegroundNotificationCallback, checkColdStartNotification } from '@/services/notifications';
+import { setupNotificationChannel, setupNotificationListeners, setForegroundNotificationCallback, checkColdStartNotification, setupFcmForegroundListener } from '@/services/notifications';
 import { NuevoServicioPopup } from '@/components/NuevoServicioPopup';
 import notifee, { EventType } from '@notifee/react-native';
 import { socket } from '@/services/socket';
 // Migracion Traccar: recovery del tracking segun device_token (Apendice B)
-import { resumeTracking, issueTokenAndStart, getDeviceToken, isActive } from '@/services/traccarTracking';
+import { ensureAndResume, issueTokenAndStart, getDeviceToken, isActive } from '@/services/traccarTracking';
 import { secureStorage, TOKEN_KEY } from '@/services/storage';
 
 // Unifica campos snake_case / camelCase entre WebSocket, Push y Notifee
@@ -181,8 +181,8 @@ function RootLayoutContent() {
     }, []);
 
     // Migracion Traccar: recovery del tracking en cold-start (Apendice B).
-    // Si hay sesion valida, se reanuda via device_token (resumeTracking) o se
-    // emite uno nuevo (issueTokenAndStart). El ForegroundService del SDK sobrevive
+    // Si hay sesion valida, se verifica via device_token (ensureAndResume) o se
+    // emite uno nuevo (issueTokenAndStart). Si esta displaced, otro dispositivo tomo la sesion. El ForegroundService del SDK sobrevive
     // OS-kill/reboot (BootReceiver); aqui solo aseguramos que este activo.
     useEffect(() => {
         if (isLoading || !isAuthenticated) return;
@@ -192,8 +192,14 @@ function RootLayoutContent() {
             try {
                 if (await isActive()) return; // ya corriendo -> nada (evita carrera con login)
                 if (await getDeviceToken()) {
-                    await resumeTracking();
-                    console.log('[_layout] resumeTracking (device_token presente)');
+                    const r = await ensureAndResume();
+                    if (r.ok) {
+                        console.log('[_layout] ensureAndResume: token verificado');
+                    } else if (r.reason === 'displaced') {
+                        console.warn('[_layout] ensureAndResume: displaced — otro dispositivo activo');
+                    } else {
+                        console.warn('[_layout] ensureAndResume fallo:', r.reason);
+                    }
                 } else if (await secureStorage.getItem(TOKEN_KEY)) {
                     const r = await issueTokenAndStart(); // single-flight con login
                     console.log('[_layout] issueTokenAndStart:', r.ok);
@@ -212,14 +218,17 @@ function RootLayoutContent() {
                     setPopupData(data);
                 });
                 setupNotificationListeners();
-                // Check if app was opened from a notification tap (cold start from Expo push)
                 checkColdStartNotification();
             } catch (error) {
                 console.warn('[RootLayout] Error setting up notifications:', error);
             }
         };
         setup();
-        return () => { setForegroundNotificationCallback(null); };
+        const unsubFcm = setupFcmForegroundListener();
+        return () => {
+            setForegroundNotificationCallback(null);
+            unsubFcm();
+        };
     }, []);
 
     // WebSocket listener: show popup from socket events too (Bug C/E fix)

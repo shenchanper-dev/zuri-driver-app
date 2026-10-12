@@ -12,7 +12,7 @@ import { issueTokenAndStart, stopAndRevoke } from '@/services/traccarTracking';
 import * as LocalAuthentication from 'expo-local-authentication';
 import { api } from '@/services/api';
 import { secureStorage, TOKEN_KEY } from '@/services/storage';
-import { registerForPushNotifications } from '@/services/notifications';
+import { registerForFcmPushNotifications } from '@/services/notifications';
 
 // ============================================================================
 // Types
@@ -130,7 +130,7 @@ export const useAuthStore = create<AuthState>()(
                         await secureStorage.setItem(TOKEN_KEY, response.token);
 
                         // Register for push notifications (non-blocking)
-                        registerForPushNotifications().catch(err =>
+                        registerForFcmPushNotifications().catch(err =>
                             console.warn('[auth:push] Failed to register push token:', err)
                         );
 
@@ -217,7 +217,7 @@ export const useAuthStore = create<AuthState>()(
 
                     if (response.success) {
                         // Register for push notifications (non-blocking)
-                        registerForPushNotifications().catch(err =>
+                        registerForFcmPushNotifications().catch(err =>
                             console.warn('[auth:push] Failed to register push token:', err)
                         );
 
