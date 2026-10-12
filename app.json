@@ -57,7 +57,8 @@
         "android.permission.USE_FINGERPRINT",
         "android.permission.RECORD_AUDIO",
         "android.permission.USE_FULL_SCREEN_INTENT"
-      ]
+      ],
+      "versionCode": 107
     },
     "plugins": [
       [
@@ -88,15 +89,6 @@
         "expo-local-authentication",
         {
           "faceIDPermission": "Usar Face ID para autenticación segura"
-        }
-      ],
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/notification-icon.png",
-          "color": "#00875A",
-          "defaultChannel": "servicios-urgentes",
-          "sounds": []
         }
       ],
       [
