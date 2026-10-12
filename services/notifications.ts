@@ -3,6 +3,7 @@ import * as Device from 'expo-device';
 import * as TaskManager from 'expo-task-manager';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
+import messaging from '@react-native-firebase/messaging';
 import notifee, { AndroidImportance, AndroidVisibility, AndroidCategory } from '@notifee/react-native';
 import { driverApi } from './api';
 
@@ -18,6 +19,7 @@ export function setForegroundNotificationCallback(cb: ForegroundNotificationCall
     _foregroundCallback = cb;
 }
 
+// ── Expo notification handler (legacy, se quita en PASO 5) ───────────
 Notifications.setNotificationHandler({
     handleNotification: async (notification) => {
         const tipo = (notification.request.content.data as any)?.tipo;
@@ -32,14 +34,9 @@ Notifications.setNotificationHandler({
     },
 });
 
+// ── Expo background task (legacy, se quita en PASO 5) ────────────────
 const BACKGROUND_NOTIFICATION_TASK = 'BACKGROUND_NOTIFICATION_TASK';
 
-/**
- * Runs when a push arrives while the app is backgrounded or killed (Android).
- * Shows a full-screen "incoming service" notification via Notifee so the
- * driver sees the same accept/close card even without opening the app —
- * mirrors the incoming-ride pattern used by Uber/Didi/InDriver.
- */
 TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => {
     if (error) {
         console.error('[zuri:notifications] Background task error:', error);
@@ -56,13 +53,29 @@ TaskManager.defineTask(BACKGROUND_NOTIFICATION_TASK, async ({ data, error }) => 
     }
 });
 
-/**
- * Shows a full-screen incoming-service notification (Notifee), which on
- * Android launches straight to the app over the lock screen when the
- * driver has granted the "full screen notifications" permission (required
- * manually by the user on Android 14+). Falls back to a normal heads-up
- * notification when that permission isn't granted.
- */
+// ── FCM background handler (top-level, fuera de componentes) ─────────
+messaging().setBackgroundMessageHandler(async (remoteMessage) => {
+    console.log('[zuri:fcm] Background message:', remoteMessage.messageId);
+    const data = remoteMessage.data as Record<string, any> | undefined;
+    if (!data) return;
+
+    if (data.tipo === 'NUEVO_SERVICIO' || data.tipo === 'SERVICIO_CANCELADO') {
+        await displayFullScreenServiceNotification(data);
+    } else {
+        await notifee.displayNotification({
+            title: data.title || 'ZURI',
+            body: data.body || '',
+            data,
+            android: {
+                channelId: data.channelId || 'servicios-urgentes',
+                importance: AndroidImportance.HIGH,
+                sound: 'default',
+                pressAction: { id: 'default' },
+            },
+        });
+    }
+});
+
 export async function displayFullScreenServiceNotification(payload: Record<string, any>) {
     if (Platform.OS !== 'android') return;
     try {
@@ -74,7 +87,7 @@ export async function displayFullScreenServiceNotification(payload: Record<strin
 
         await notifee.displayNotification({
             id: `servicio-${payload.serviceId ?? payload.detalle_id ?? Date.now()}`,
-            title: 'SERVICIO ASIGNADO',
+            title: payload.title || 'SERVICIO ASIGNADO',
             body: [doctor, bodyParts, distrito].filter(Boolean).join('\n'),
             data: payload,
             android: {
@@ -101,10 +114,6 @@ export async function displayFullScreenServiceNotification(payload: Record<strin
     }
 }
 
-/**
- * Setup notification channel for Android (required for SDK 54+)
- * MAX importance ensures high priority notifications break through DND
- */
 export async function setupNotificationChannel() {
     if (Platform.OS === 'android') {
         try {
@@ -143,19 +152,104 @@ export async function setupNotificationChannel() {
     }
 }
 
-/**
- * Request notification permissions and register for push notifications
- * Returns the push token if successful, null otherwise
- */
+// ── FCM registration (nativo) ────────────────────────────────────────
+export async function registerForFcmPushNotifications(): Promise<string | null> {
+    try {
+        if (!Device.isDevice) {
+            console.warn('[zuri:fcm] Not a physical device — push disabled');
+            return null;
+        }
+
+        const authStatus = await messaging().requestPermission();
+        const enabled =
+            authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+            authStatus === messaging.AuthorizationStatus.PROVISIONAL;
+
+        if (!enabled) {
+            console.warn('[zuri:fcm] Push permission denied');
+            return null;
+        }
+
+        if (Platform.OS === 'android') {
+            try { await notifee.requestPermission(); }
+            catch (e) { console.warn('[zuri:fcm] Notifee permission request failed:', e); }
+        }
+
+        const fcmToken = await messaging().getToken();
+        console.log('[zuri:fcm] Got FCM token:', fcmToken.substring(0, 20) + '...');
+
+        try {
+            await driverApi.registerPushToken(fcmToken);
+            console.log('[zuri:fcm] FCM token registered with backend');
+        } catch (error) {
+            console.error('[zuri:fcm] Failed to register FCM token:', error);
+        }
+
+        messaging().onTokenRefresh(async (newToken) => {
+            console.log('[zuri:fcm] Token refreshed:', newToken.substring(0, 20) + '...');
+            try { await driverApi.registerPushToken(newToken); }
+            catch (e) { console.warn('[zuri:fcm] Token refresh register failed:', e); }
+        });
+
+        return fcmToken;
+    } catch (error) {
+        console.error('[zuri:fcm] Error registering for FCM push:', error);
+        return null;
+    }
+}
+
+// ── FCM foreground listener ──────────────────────────────────────────
+export function setupFcmForegroundListener(): () => void {
+    const unsubscribe = messaging().onMessage(async (remoteMessage) => {
+        console.log('[zuri:fcm] Foreground message:', remoteMessage.messageId);
+        const data = remoteMessage.data as Record<string, any> | undefined;
+        if (!data) return;
+
+        if (data.tipo === 'NUEVO_SERVICIO') {
+            if (_foregroundCallback) {
+                _foregroundCallback({
+                    title: data.title || 'SERVICIO ASIGNADO',
+                    body: data.body || '',
+                    payload: data,
+                });
+            } else {
+                await displayFullScreenServiceNotification(data);
+            }
+        } else if (data.tipo === 'SERVICIO_CANCELADO') {
+            await displayFullScreenServiceNotification(data);
+            if (_foregroundCallback) {
+                _foregroundCallback({
+                    title: data.title || 'SERVICIO CANCELADO',
+                    body: data.body || '',
+                    payload: data,
+                });
+            }
+        } else if (data.tipo === 'chat_message') {
+            await notifee.displayNotification({
+                title: data.title || 'Mensaje',
+                body: data.body || '',
+                data,
+                android: {
+                    channelId: data.channelId || 'servicios-urgentes',
+                    importance: AndroidImportance.HIGH,
+                    sound: 'default',
+                    pressAction: { id: 'default' },
+                },
+            });
+        }
+    });
+
+    return unsubscribe;
+}
+
+// ── Expo push registration (legacy, se reemplaza en PASO 4) ──────────
 export async function registerForPushNotifications(): Promise<string | null> {
     try {
-        // Check if device supports notifications
         if (!Device.isDevice) {
             console.warn('[zuri:notifications] Not a physical device — push disabled');
             return null;
         }
 
-        // Request permission
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
         let finalStatus = existingStatus;
 
@@ -177,13 +271,11 @@ export async function registerForPushNotifications(): Promise<string | null> {
             }
         }
 
-        // Get push token
         const token = await Notifications.getExpoPushTokenAsync({
             projectId: Constants.expoConfig?.extra?.eas?.projectId ?? '0eae9dfa-a897-445d-89b0-9cdb74ea905c',
         });
         console.log('[zuri:notifications] Got push token:', token.data.substring(0, 40) + '...');
 
-        // Send token to backend
         try {
             await driverApi.registerPushToken(token.data);
             console.log('[zuri:notifications] Push token registered with backend');
@@ -199,9 +291,6 @@ export async function registerForPushNotifications(): Promise<string | null> {
     }
 }
 
-/**
- * Setup notification response listeners
- */
 export function setupNotificationListeners(): () => void {
     const notificationListener = Notifications.addNotificationReceivedListener((notification) => {
         const content = notification.request.content;
@@ -215,7 +304,6 @@ export function setupNotificationListeners(): () => void {
         }
     });
 
-    // Listen for notification taps — show popup when user opens app from notification
     const responseListener = Notifications.addNotificationResponseReceivedListener((response) => {
         const content = response.notification.request.content;
         const payload = (content.data as Record<string, any>) ?? {};
@@ -229,19 +317,12 @@ export function setupNotificationListeners(): () => void {
         }
     });
 
-    // Return cleanup function
     return () => {
         notificationListener.remove();
         responseListener.remove();
     };
 }
 
-
-/**
- * Check if the app was opened from a notification tap (cold start).
- * Call once on mount to handle the case where user tapped a push
- * notification that opened the app from a killed state.
- */
 export async function checkColdStartNotification(): Promise<void> {
     try {
         const response = await Notifications.getLastNotificationResponseAsync();
@@ -262,9 +343,6 @@ export async function checkColdStartNotification(): Promise<void> {
     }
 }
 
-/**
- * Legacy support: Show local notification for new service assignment
- */
 export async function showServiceAssignedNotification(service: {
     codigo: string;
     pacienteNombre: string;
