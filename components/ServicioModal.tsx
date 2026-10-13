@@ -104,7 +104,7 @@ export function ServicioModal({ visible, asignacion, onAceptado, onClose }: Prop
         if (loading) return;
         setLoading(true);
         try {
-            const res = await driverApi.avanzarProgramacion(asignacion.id, 'EN_RUTA_ORIGEN');
+            const res = await driverApi.avanzarProgramacion(asignacion.id, 'EN_CAMINO');
             if (res.success) {
                 Vibration.cancel();
                 onAceptado(asignacion);
