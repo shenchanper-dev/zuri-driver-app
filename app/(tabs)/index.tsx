@@ -12,6 +12,8 @@ import { COLORS, FONT, SPACING, RADIUS, SHADOW } from '../../constants/theme';
 import { MapaDriver, MapaDriverRef } from '@/components/MapaDriver';
 import { HomeBottomSheet } from '@/components/HomeBottomSheet';
 import { ChatScreen } from '@/components/ChatScreen';
+import { JornadaActivaView } from '@/components/JornadaActivaView';
+import type { Servicio } from '@/types/servicios';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { useDriverLocation } from '@/hooks/useDriverLocation';
 import { isActive as trackingIsActive, restart } from '@/services/traccarTracking';
@@ -33,6 +35,7 @@ export default function HomeScreen() {
     const isOnline = online;
     const [isToggling, setIsToggling]           = useState(false);
     const [serviciosResumen, setServiciosResumen] = useState({ pendientes: 0, activos: 0 });
+    const [servicios, setServicios] = useState<Servicio[]>([]);
     const [servicioActivoId, setServicioActivoId] = useState<number | null>(null);
     const [chatOpen, setChatOpen]               = useState(false);
 
@@ -40,12 +43,13 @@ export default function HomeScreen() {
     const refrescarResumen = useCallback(async () => {
         try {
             const res = await driverApi.getServices();
-            const todos: any[] = res.servicios ?? [];
-            const activos = todos.filter((s: any) =>
+            const todos: Servicio[] = res.servicios ?? [];
+            setServicios(todos);
+            const activos = todos.filter((s) =>
                 ['PENDIENTE', 'EN_RUTA_ORIGEN', 'EN_ORIGEN', 'EN_RUTA_DESTINO', 'EN_DESTINO'].includes(s.estado)
             );
             setServiciosResumen({
-                pendientes: todos.filter((s: any) => s.estado === 'PENDIENTE').length,
+                pendientes: todos.filter((s) => s.estado === 'PENDIENTE').length,
                 activos: activos.length,
             });
             setServicioActivoId(activos[0]?.id ?? null);
@@ -161,6 +165,22 @@ export default function HomeScreen() {
 
     const headerPaddingTop = Platform.OS === 'web' ? 16 : 50;
 
+    // Agrupar servicios por jornada.id. La jornada activa (PUBLICADA/ACTIVA) manda.
+    const serviciosConJornada = servicios.filter(sv => sv.jornada);
+    const jornadaActiva = (() => {
+        if (serviciosConJornada.length === 0) return null;
+        // Buscar jornada ACTIVA primero, luego PUBLICADA
+        const porEstado = ['ACTIVA', 'PUBLICADA'];
+        for (const estado of porEstado) {
+            const match = serviciosConJornada.find(sv => sv.jornada?.estado === estado);
+            if (match) {
+                const jid = match.jornada!.id;
+                return serviciosConJornada.filter(sv => sv.jornada?.id === jid);
+            }
+        }
+        return null;
+    })();
+
     return (
         <View style={[s.root, Platform.OS === 'web' ? webRoot : null]}>
             <StatusBar barStyle="light-content" backgroundColor="#1F2937" translucent={false} />
@@ -238,18 +258,29 @@ export default function HomeScreen() {
                 <Text style={s.fabIcon}>📍</Text>
             </TouchableOpacity>
 
-            {/* BOTTOM SHEET FLOTANTE */}
-            <HomeBottomSheet
-                isConnected={isOnline}
-                stats={{
-                    completados: 0,
-                    activos: serviciosResumen.activos,
-                    pendientes: serviciosResumen.pendientes,
-                }}
-                hasServicioActivo={isOnline && serviciosResumen.activos > 0}
-                onOpenServicioActivo={() => router.push('/(tabs)/services')}
-                onOpenChat={servicioActivoId ? () => setChatOpen(true) : undefined}
-            />
+            {/* BOTTOM: si hay jornada activa -> overlay multiparada; si no -> bottom sheet */}
+            {jornadaActiva ? (
+                <View style={s.jornadaOverlay} pointerEvents="box-none">
+                    <View style={s.jornadaCard}>
+                        <JornadaActivaView
+                            servicios={jornadaActiva}
+                            onRefresh={refrescarResumen}
+                        />
+                    </View>
+                </View>
+            ) : (
+                <HomeBottomSheet
+                    isConnected={isOnline}
+                    stats={{
+                        completados: 0,
+                        activos: serviciosResumen.activos,
+                        pendientes: serviciosResumen.pendientes,
+                    }}
+                    hasServicioActivo={isOnline && serviciosResumen.activos > 0}
+                    onOpenServicioActivo={() => router.push('/(tabs)/services')}
+                    onOpenChat={servicioActivoId ? () => setChatOpen(true) : undefined}
+                />
+            )}
 
             {/* CHAT MODAL */}
             <Modal
@@ -396,6 +427,26 @@ const s = StyleSheet.create({
         zIndex: 15,
     },
     locatingTx: { color: '#fff', fontSize: 12, fontWeight: '600' },
+
+    // Overlay jornada activa
+    jornadaOverlay: {
+        position: 'absolute',
+        left: 0, right: 0, bottom: 0,
+        height: '55%',
+    },
+    jornadaCard: {
+        flex: 1,
+        marginHorizontal: 10,
+        marginBottom: 10,
+        borderRadius: 16,
+        overflow: 'hidden',
+        backgroundColor: '#fff',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.15,
+        shadowRadius: 10,
+        elevation: 8,
+    },
 });
 
 // Web-only override applied inline — keeps StyleSheet types clean
