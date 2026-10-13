@@ -202,7 +202,7 @@ export const driverApi = {
     responderProgramacion: (detalleId: number, accion: 'ACEPTAR' | 'RECHAZAR', motivo?: string) =>
         api.authPatch('/drivers/programacion', { detalleId, accion, motivo }),
 
-    avanzarProgramacion: (detalleId: number, accion: 'EN_CAMINO' | 'EN_ORIGEN' | 'EN_TRANSPORTE' | 'EN_DESTINO' | 'COMPLETAR') =>
+    avanzarProgramacion: (detalleId: number, accion: 'EN_RUTA_ORIGEN' | 'EN_ORIGEN' | 'EN_RUTA_DESTINO' | 'EN_DESTINO' | 'COMPLETAR') =>
         api.authPatch('/drivers/programacion', { detalleId, accion }),
 
     // Location

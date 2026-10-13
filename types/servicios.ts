@@ -50,17 +50,17 @@ export interface AsignacionProgramacion {
 export type TabType = 'pendientes' | 'activos' | 'historial';
 
 // States
-export const ESTADOS_PENDIENTE = ['ASIGNADO', 'ACEPTADO'] as const;
-export const ESTADOS_ACTIVO = ['EN_CAMINO', 'EN_ORIGEN', 'EN_TRANSPORTE', 'EN_DESTINO'] as const;
-export const ESTADOS_HISTORIAL = ['COMPLETADO', 'CANCELADO', 'INCIDENTE'] as const;
+export const ESTADOS_PENDIENTE = ['PENDIENTE', 'PENDIENTE'] as const;
+export const ESTADOS_ACTIVO = ['EN_RUTA_ORIGEN', 'EN_ORIGEN', 'EN_RUTA_DESTINO', 'EN_DESTINO'] as const;
+export const ESTADOS_HISTORIAL = ['ATENDIDA', 'DESCARTADA', 'INCIDENTE'] as const;
 
 // Acciones de avance (para programacion_detalle)
-export type AccionProgresion = 'EN_CAMINO' | 'EN_ORIGEN' | 'EN_TRANSPORTE' | 'EN_DESTINO' | 'COMPLETAR';
+export type AccionProgresion = 'EN_RUTA_ORIGEN' | 'EN_ORIGEN' | 'EN_RUTA_DESTINO' | 'EN_DESTINO' | 'COMPLETAR';
 
 export const ACCION_PROGRESION: Record<string, AccionProgresion> = {
-    EN_CAMINO: 'EN_CAMINO',
+    EN_CAMINO: 'EN_RUTA_ORIGEN',
     EN_ORIGEN: 'EN_ORIGEN',
-    EN_TRANSPORTE: 'EN_TRANSPORTE',
+    EN_TRANSPORTE: 'EN_RUTA_DESTINO',
     EN_DESTINO: 'EN_DESTINO',
     COMPLETADO: 'COMPLETAR',
 };
@@ -106,9 +106,9 @@ export const ACCENT_COLOR: Record<string, string> = {
 
 // Labels y config de botones de avance
 export const AVANCE_CONFIG: Record<string, { label: string; accion: AccionProgresion; bg: string }> = {
-    ACEPTADO:      { label: '🚗  EN CAMINO',            accion: 'EN_CAMINO',    bg: '#0B1F3A' },
+    ACEPTADO:      { label: '🚗  EN CAMINO',            accion: 'EN_RUTA_ORIGEN',    bg: '#0B1F3A' },
     EN_CAMINO:     { label: '📍  LLEGADA',              accion: 'EN_ORIGEN',    bg: '#0B1F3A' },
-    EN_ORIGEN:     { label: '👨‍⚕️  PROFESIONAL ABORDO', accion: 'EN_TRANSPORTE', bg: '#0B1F3A' },
+    EN_ORIGEN:     { label: '👨‍⚕️  PROFESIONAL ABORDO', accion: 'EN_RUTA_DESTINO', bg: '#0B1F3A' },
     EN_TRANSPORTE: { label: '🏥  DEJANDO PROFESIONAL',  accion: 'EN_DESTINO',   bg: '#0B1F3A' },
     EN_DESTINO:    { label: '✅  TERMINO',              accion: 'COMPLETAR',    bg: '#00875A' },
 };

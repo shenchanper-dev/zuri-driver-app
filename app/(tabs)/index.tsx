@@ -42,10 +42,10 @@ export default function HomeScreen() {
             const res = await driverApi.getServices();
             const todos: any[] = res.servicios ?? [];
             const activos = todos.filter((s: any) =>
-                ['ACEPTADO', 'EN_CAMINO', 'EN_ORIGEN', 'EN_TRANSPORTE', 'EN_DESTINO'].includes(s.estado)
+                ['PENDIENTE', 'EN_RUTA_ORIGEN', 'EN_ORIGEN', 'EN_RUTA_DESTINO', 'EN_DESTINO'].includes(s.estado)
             );
             setServiciosResumen({
-                pendientes: todos.filter((s: any) => s.estado === 'ASIGNADO').length,
+                pendientes: todos.filter((s: any) => s.estado === 'PENDIENTE').length,
                 activos: activos.length,
             });
             setServicioActivoId(activos[0]?.id ?? null);
@@ -59,7 +59,7 @@ export default function HomeScreen() {
         try {
             const res = await driverApi.getServices();
             const todos: any[] = res.servicios ?? [];
-            const pendientes = todos.filter((s: any) => s.estado === 'ASIGNADO');
+            const pendientes = todos.filter((s: any) => s.estado === 'PENDIENTE');
             if (pendientes.length > 0) {
                 Alert.alert(
                     '🔔 Tienes servicios pendientes',
@@ -71,7 +71,7 @@ export default function HomeScreen() {
                 );
             }
             const activos = todos.filter((s: any) =>
-                ['ACEPTADO', 'EN_CAMINO', 'EN_ORIGEN', 'EN_TRANSPORTE', 'EN_DESTINO'].includes(s.estado)
+                ['PENDIENTE', 'EN_RUTA_ORIGEN', 'EN_ORIGEN', 'EN_RUTA_DESTINO', 'EN_DESTINO'].includes(s.estado)
             );
             setServiciosResumen({ pendientes: pendientes.length, activos: activos.length });
             setServicioActivoId(activos[0]?.id ?? null);

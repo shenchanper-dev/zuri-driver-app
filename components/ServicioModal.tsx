@@ -26,7 +26,7 @@ function GridItem({ icon, label, value }: { icon: string; label: string; value: 
 
 export function ServicioModal({ visible, asignacion, onAceptado, onClose }: Props) {
     const [loading, setLoading] = useState(false);
-    const [realState, setRealState] = useState<'ASIGNADO' | 'ACEPTADO' | null>(null);
+    const [realState, setRealState] = useState<'PENDIENTE' | 'PENDIENTE' | null>(null);
     const fadeAnim = useRef(new Animated.Value(0)).current;
     const scaleAnim = useRef(new Animated.Value(0.96)).current;
 
@@ -62,10 +62,10 @@ export function ServicioModal({ visible, asignacion, onAceptado, onClose }: Prop
                 const found = (res.servicios ?? []).find(
                     (s: any) => s.id === asignacion.id && s.fuente === 'PROGRAMACION'
                 );
-                if (found?.estado === 'ACEPTADO') {
-                    setRealState('ACEPTADO');
-                } else if (found?.estado === 'ASIGNADO') {
-                    setRealState('ASIGNADO');
+                if (found?.estado === 'PENDIENTE') {
+                    setRealState('PENDIENTE');
+                } else if (found?.estado === 'PENDIENTE') {
+                    setRealState('PENDIENTE');
                 }
                 // else: leave null → fallback to ACEPTAR button
             } catch {
@@ -104,7 +104,7 @@ export function ServicioModal({ visible, asignacion, onAceptado, onClose }: Prop
         if (loading) return;
         setLoading(true);
         try {
-            const res = await driverApi.avanzarProgramacion(asignacion.id, 'EN_CAMINO');
+            const res = await driverApi.avanzarProgramacion(asignacion.id, 'EN_RUTA_ORIGEN');
             if (res.success) {
                 Vibration.cancel();
                 onAceptado(asignacion);
@@ -223,7 +223,7 @@ export function ServicioModal({ visible, asignacion, onAceptado, onClose }: Prop
                     <View style={s.sep} />
 
                     {/* Action button — EN_CAMINO if already accepted, ACEPTAR otherwise */}
-                    {realState === 'ACEPTADO' ? (
+                    {realState === 'PENDIENTE' ? (
                         <TouchableOpacity
                             style={[s.btnAceptar, s.btnEnCamino, loading && s.btnDisabled]}
                             onPress={handleIrEnCamino}

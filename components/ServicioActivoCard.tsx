@@ -8,7 +8,7 @@ import type { Servicio } from '@/types/servicios';
 import { BADGE_CONFIG, ACCENT_COLOR, AVANCE_CONFIG } from '@/types/servicios';
 import { COLORS, RADIUS, SHADOW } from '@/constants/theme';
 
-const PASOS_ESTADO = ['ACEPTADO', 'EN_CAMINO', 'EN_ORIGEN', 'EN_TRANSPORTE', 'EN_DESTINO', 'COMPLETADO'] as const;
+const PASOS_ESTADO = ['PENDIENTE', 'EN_RUTA_ORIGEN', 'EN_ORIGEN', 'EN_RUTA_DESTINO', 'EN_DESTINO', 'ATENDIDA'] as const;
 
 interface Props {
     servicio: Servicio;
