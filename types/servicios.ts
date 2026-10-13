@@ -50,8 +50,8 @@ export interface AsignacionProgramacion {
 export type TabType = 'pendientes' | 'activos' | 'historial';
 
 // States
-export const ESTADOS_PENDIENTE = ['ASIGNADO'] as const;
-export const ESTADOS_ACTIVO = ['ACEPTADO', 'EN_CAMINO', 'EN_ORIGEN', 'EN_TRANSPORTE', 'EN_DESTINO'] as const;
+export const ESTADOS_PENDIENTE = ['ASIGNADO', 'ACEPTADO'] as const;
+export const ESTADOS_ACTIVO = ['EN_CAMINO', 'EN_ORIGEN', 'EN_TRANSPORTE', 'EN_DESTINO'] as const;
 export const ESTADOS_HISTORIAL = ['COMPLETADO', 'CANCELADO', 'INCIDENTE'] as const;
 
 // Acciones de avance (para programacion_detalle)
