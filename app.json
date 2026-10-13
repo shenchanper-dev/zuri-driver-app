@@ -58,7 +58,7 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.USE_FULL_SCREEN_INTENT"
       ],
-      "versionCode": 107
+      "versionCode": 108
     },
     "plugins": [
       [
