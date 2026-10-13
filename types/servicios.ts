@@ -3,6 +3,18 @@
  */
 
 // ── Servicio clásico (tabla servicios) ──────────────────────────────────────
+export interface JornadaInfo {
+    id: number;
+    doctor_nombre: string | null;
+    turno: string | null;
+    cliente_nombre: string | null;
+    estado: 'PUBLICADA' | 'ACTIVA' | string;
+    total_paradas: number;
+    atendidas: number;
+    hora_inicio_planeada: string | null;
+    hora_fin_planeada: string | null;
+}
+
 export interface Servicio {
     id: number;
     codigo: string;
@@ -19,6 +31,8 @@ export interface Servicio {
     fecha?: string;
     hora_inicio?: string;
     hora_fin?: string;
+    orden?: number | null;
+    jornada?: JornadaInfo;
     paciente: {
         nombre: string;
         telefono?: string;
