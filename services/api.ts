@@ -205,6 +205,13 @@ export const driverApi = {
     avanzarProgramacion: (detalleId: number, accion: 'EN_CAMINO' | 'EN_ORIGEN' | 'EN_TRANSPORTE' | 'EN_DESTINO' | 'COMPLETAR') =>
         api.authPatch('/drivers/programacion', { detalleId, accion }),
 
+    // Jornada — inicio/fin hibrido (FASE E backend)
+    iniciarJornada: (jornadaId: number, paradasDeclaradas?: number) =>
+        api.authPost(`/v3/jornadas/${jornadaId}/iniciar`, paradasDeclaradas != null ? { paradas_declaradas: paradasDeclaradas } : {}),
+
+    finalizarJornada: (jornadaId: number) =>
+        api.authPost(`/v3/jornadas/${jornadaId}/finalizar`, {}),
+
     // Location
     updateLocation: (data: any) =>
         api.authPost('/drivers/location', data),
