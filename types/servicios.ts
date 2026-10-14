@@ -9,10 +9,17 @@ export interface JornadaInfo {
     turno: string | null;
     cliente_nombre: string | null;
     estado: 'PUBLICADA' | 'ACTIVA' | string;
+    modo?: 'ESPECIAL' | 'NEMT';
     total_paradas: number;
     atendidas: number;
     hora_inicio_planeada: string | null;
     hora_fin_planeada: string | null;
+    // FASE E — inicio/fin hibrido + paradas detectadas por GPS
+    inicio_real_at?: string | null;
+    fin_real_at?: string | null;
+    paradas_declaradas?: number | null;
+    paradas_detectadas?: number;
+    sugerencia_inicio_at?: string | null;
 }
 
 export interface Servicio {
