@@ -13,6 +13,7 @@ import { MapaDriver, MapaDriverRef } from '@/components/MapaDriver';
 import { HomeBottomSheet } from '@/components/HomeBottomSheet';
 import { ChatScreen } from '@/components/ChatScreen';
 import { JornadaActivaView } from '@/components/JornadaActivaView';
+import { JornadaEspecialView } from '@/components/JornadaEspecialView';
 import type { Servicio } from '@/types/servicios';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { useDriverLocation } from '@/hooks/useDriverLocation';
@@ -262,10 +263,17 @@ export default function HomeScreen() {
             {jornadaActiva ? (
                 <View style={s.jornadaOverlay} pointerEvents="box-none">
                     <View style={s.jornadaCard}>
-                        <JornadaActivaView
-                            servicios={jornadaActiva}
-                            onRefresh={refrescarResumen}
-                        />
+                        {jornadaActiva[0]?.jornada?.modo === 'ESPECIAL' ? (
+                            <JornadaEspecialView
+                                servicios={jornadaActiva}
+                                onRefresh={refrescarResumen}
+                            />
+                        ) : (
+                            <JornadaActivaView
+                                servicios={jornadaActiva}
+                                onRefresh={refrescarResumen}
+                            />
+                        )}
                     </View>
                 </View>
             ) : (
