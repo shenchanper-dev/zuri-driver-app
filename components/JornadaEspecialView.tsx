@@ -101,14 +101,16 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
     }, [currentLocation?.latitude, currentLocation?.longitude]);
 
     const minutosDetenido = ancla ? Math.floor((now - ancla.since) / 60000) : 0;
+    const gpsDisponible = !!currentLocation;
 
     const colorParada = useMemo(() => {
         if (jornada?.estado !== 'ACTIVA') return null;
+        if (!gpsDisponible) return { bg: '#F3F4F6', fg: '#9CA3AF', label: 'Sin señal GPS' };
         if (minutosDetenido < 1) return { bg: '#F3F4F6', fg: '#6B7280', label: 'En movimiento' };
         if (minutosDetenido < 10) return { bg: '#F3F4F6', fg: '#6B7280', label: `Detenido ${minutosDetenido}m` };
         if (minutosDetenido < 15) return { bg: '#FEF3C7', fg: '#92400E', label: `Parada posible · ${minutosDetenido}m` };
         return { bg: '#D1FAE5', fg: '#065F46', label: `Con un paciente · ${minutosDetenido}m` };
-    }, [jornada?.estado, minutosDetenido]);
+    }, [jornada?.estado, minutosDetenido, gpsDisponible]);
 
     const handleIniciar = () => {
         setParadasInput('');
