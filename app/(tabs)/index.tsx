@@ -14,6 +14,8 @@ import { HomeBottomSheet } from '@/components/HomeBottomSheet';
 import { ChatScreen } from '@/components/ChatScreen';
 import { JornadaActivaView } from '@/components/JornadaActivaView';
 import { JornadaEspecialView } from '@/components/JornadaEspecialView';
+import BottomSheet, { BottomSheetView } from '@gorhom/bottom-sheet';
+import { useRef as useRefBS, useMemo as useMemoBS } from 'react';
 import type { Servicio } from '@/types/servicios';
 import { usePushNotifications } from '@/hooks/usePushNotifications';
 import { useDriverLocation } from '@/hooks/useDriverLocation';
@@ -166,6 +168,10 @@ export default function HomeScreen() {
 
     const headerPaddingTop = Platform.OS === 'web' ? 16 : 50;
 
+    // Bottom sheet: 3 snap points (colapsado 110px, medio 45%, expandido 85%)
+    const bsRef = useRefBS<BottomSheet>(null);
+    const snapPoints = useMemoBS(() => ['110', '45%', '85%'], []);
+
     // Agrupar servicios por jornada.id. La jornada activa (PUBLICADA/ACTIVA) manda.
     const serviciosConJornada = servicios.filter(sv => sv.jornada);
     const jornadaActiva = (() => {
@@ -259,23 +265,30 @@ export default function HomeScreen() {
                 <Text style={s.fabIcon}>📍</Text>
             </TouchableOpacity>
 
-            {/* BOTTOM: si hay jornada activa -> overlay multiparada; si no -> bottom sheet */}
+            {/* BOTTOM: BottomSheet arrastrable con 3 snap points (patron Uber/Onfleet) */}
             {jornadaActiva ? (
-                <View style={s.jornadaOverlay} pointerEvents="box-none">
-                    <View style={s.jornadaCard}>
-                        {jornadaActiva[0]?.jornada?.modo === 'ESPECIAL' ? (
-                            <JornadaEspecialView
-                                servicios={jornadaActiva}
-                                onRefresh={refrescarResumen}
-                            />
-                        ) : (
+                <BottomSheet
+                    ref={bsRef}
+                    snapPoints={snapPoints}
+                    index={1}
+                    enablePanDownToClose={false}
+                    handleIndicatorStyle={{ backgroundColor: '#CBD5E1', width: 48, height: 5 }}
+                    backgroundStyle={{ backgroundColor: '#FFFFFF' }}
+                >
+                    <BottomSheetView style={{ flex: 1 }}>
+                        {jornadaActiva[0]?.jornada?.modo === 'NEMT' ? (
                             <JornadaActivaView
                                 servicios={jornadaActiva}
                                 onRefresh={refrescarResumen}
                             />
+                        ) : (
+                            <JornadaEspecialView
+                                servicios={jornadaActiva}
+                                onRefresh={refrescarResumen}
+                            />
                         )}
-                    </View>
-                </View>
+                    </BottomSheetView>
+                </BottomSheet>
             ) : (
                 <HomeBottomSheet
                     isConnected={isOnline}

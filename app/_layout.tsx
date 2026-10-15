@@ -16,6 +16,7 @@ import { socket } from '@/services/socket';
 // Migracion Traccar: recovery del tracking segun device_token (Apendice B)
 import { ensureAndResume, issueTokenAndStart, getDeviceToken, isActive } from '@/services/traccarTracking';
 import { secureStorage, TOKEN_KEY } from '@/services/storage';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 // Unifica campos snake_case / camelCase entre WebSocket, Push y Notifee
 function normalizeServicioData(raw: any) {
@@ -389,9 +390,11 @@ function RootLayoutContent() {
 
 export default function RootLayout() {
     return (
-        <ErrorBoundary>
-            <RootLayoutContent />
-        </ErrorBoundary>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+            <ErrorBoundary>
+                <RootLayoutContent />
+            </ErrorBoundary>
+        </GestureHandlerRootView>
     );
 }
 
