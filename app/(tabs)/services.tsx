@@ -18,6 +18,7 @@ import { useAuthStore } from '@/stores/auth';
 import type { Servicio, AsignacionProgramacion, TabType } from '@/types/servicios';
 import { ESTADOS_PENDIENTE, ESTADOS_ACTIVO, ESTADOS_HISTORIAL } from '@/types/servicios';
 import { COLORS, RADIUS, SHADOW } from '@/constants/theme';
+import { fechaLima } from '@/services/dates';
 
 // ── Tab labels ────────────────────────────────────────────────────────────────
 
@@ -49,7 +50,7 @@ export default function ServicesScreen() {
     const loadServices = useCallback(async () => {
         try {
             // ZURI-FIX 2026-09-15: pasar fecha=hoy para no traer 30 dias (evita datos viejos pegados)
-            const hoy = new Date().toISOString().split('T')[0];
+            const hoy = fechaLima();
             const response = await driverApi.getServices({ fecha: hoy });
             console.log('[ZURI] getServices:', response.success, 'count:', response.servicios?.length, response.error || '');
             if (response.success) {

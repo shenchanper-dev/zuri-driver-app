@@ -172,6 +172,18 @@ export default function HomeScreen() {
     const bsRef = useRefBS<BottomSheet>(null);
     const snapPoints = useMemoBS(() => ['110', '45%', '85%'], []);
 
+    // T1.4: polling 60s + refresh on foreground mientras haya jornada activa.
+    useEffect(() => {
+        if (!conductor?.id) return;
+        let hayJornada = servicios.some(sv => sv.jornada);
+        if (!hayJornada) return;
+        const iv = setInterval(() => { refrescarResumen(); }, 60_000);
+        const sub = AppState.addEventListener('change', (st) => {
+            if (st === 'active') refrescarResumen();
+        });
+        return () => { clearInterval(iv); sub.remove(); };
+    }, [conductor?.id, servicios.length, refrescarResumen]);
+
     // Agrupar servicios por jornada.id. La jornada activa (PUBLICADA/ACTIVA) manda.
     const serviciosConJornada = servicios.filter(sv => sv.jornada);
     const jornadaActiva = (() => {

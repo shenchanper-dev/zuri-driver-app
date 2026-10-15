@@ -33,7 +33,7 @@ setBackgroundMessageHandler(msg, async (remoteMessage: RemoteMessage) => {
     const data = remoteMessage.data as Record<string, any> | undefined;
     if (!data) return;
 
-    if (data.tipo === 'NUEVO_SERVICIO' || data.tipo === 'SERVICIO_CANCELADO') {
+    if (data.tipo === 'NUEVO_SERVICIO' || data.tipo === 'JORNADA_ASIGNADA' || data.tipo === 'SERVICIO_CANCELADO') {
         await displayFullScreenServiceNotification(data);
     } else {
         await notifee.displayNotification({
@@ -159,7 +159,7 @@ export function setupFcmForegroundListener(): () => void {
         const data = remoteMessage.data as Record<string, any> | undefined;
         if (!data) return;
 
-        if (data.tipo === 'NUEVO_SERVICIO') {
+        if (data.tipo === 'NUEVO_SERVICIO' || data.tipo === 'JORNADA_ASIGNADA') {
             if (_foregroundCallback) {
                 _foregroundCallback({
                     title: data.title || 'SERVICIO ASIGNADO',

@@ -59,6 +59,8 @@ interface JornadaFaseE {
     turno: string | null;
     inicio_real_at?: string | null;
     fin_real_at?: string | null;
+    hora_inicio_planeada?: string | null;
+    hora_fin_planeada?: string | null;
     paradas_declaradas?: number | null;
     paradas_detectadas?: number;
     sugerencia_inicio_at?: string | null;
@@ -144,8 +146,28 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
                     onPress: async () => {
                         setLoading(true);
                         try {
-                            await driverApi.finalizarJornada(jornadaId);
-                            onRefresh();
+                            const res: any = await driverApi.finalizarJornada(jornadaId);
+                            const resumen = res?.resumen?.jornada;
+                            if (resumen) {
+                                const inicio = resumen.inicio_real_at
+                                    ? new Date(resumen.inicio_real_at).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false })
+                                    : '—';
+                                const fin = resumen.fin_real_at
+                                    ? new Date(resumen.fin_real_at).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false })
+                                    : '—';
+                                const dur = resumen.duracion_min != null ? `${Math.floor(resumen.duracion_min/60)}h ${resumen.duracion_min%60}m` : '—';
+                                Alert.alert(
+                                    'Jornada completada',
+                                    `Inicio: ${inicio}
+Fin: ${fin}
+Duracion: ${dur}
+Declaradas: ${resumen.paradas_declaradas ?? '—'}
+Detectadas: ${resumen.paradas_detectadas ?? 0}`,
+                                    [{ text: 'Listo', onPress: () => onRefresh() }],
+                                );
+                            } else {
+                                onRefresh();
+                            }
                         } catch (e: any) {
                             Alert.alert('Error', e?.message || 'No se pudo finalizar.');
                         } finally {
@@ -192,6 +214,20 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
                         <Text style={s.bannerTx}>¿Ya iniciaste tu jornada?</Text>
                     </View>
                 )}
+
+                {/* T1.6: Banner recordatorio FIN (ACTIVA + hora_fin + 60 min pasado) */}
+                {esActiva && jornada.hora_fin_planeada && (() => {
+                    const [hh, mm] = jornada.hora_fin_planeada.split(':').map(Number);
+                    const finPlan = new Date();
+                    finPlan.setHours(hh, mm, 0, 0);
+                    const vencido = Date.now() - finPlan.getTime() > 60 * 60 * 1000;
+                    if (!vencido) return null;
+                    return (
+                        <View style={[s.banner, { backgroundColor: '#FEE2E2', borderLeftColor: '#DC2626' }]}>
+                            <Text style={[s.bannerTx, { color: '#991B1B' }]}>¿Terminaste tu jornada? Supero la hora planeada en +60 min.</Text>
+                        </View>
+                    );
+                })()}
 
                 {/* Estado ACTIVA: cronometro + contadores + color parada */}
                 {esActiva && (
