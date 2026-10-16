@@ -1,21 +1,17 @@
 /**
- * JornadaEspecialView — Vista ESPECIAL para el conductor (APK 111 · PASO 1.A).
+ * JornadaEspecialView — Vista ESPECIAL para el conductor.
  *
- * Estructura (patron Uber Driver):
- *   - Self-contained BottomSheet @gorhom con snap points 16% / 46% / 86%.
- *   - BottomSheetScrollView: contenido scrolleable (header + banners + cards).
- *   - BottomSheetFooter: CTA full-width ANCLADO al borde inferior del sheet
- *     respetando safe-area insets. Resuelve el bug previo del boton a media
- *     pantalla (antes era un <View> normal dentro del scroll).
- *   - Modal "Cuantas paradas hoy?" (existente, no cambia la logica).
+ * APK 111:
+ *  · PASO 1.A: BottomSheet self-contained + CTA anclado (BottomSheetFooter).
+ *  · PASO 1.B: estado PRE-INICIO con jerarquia densa (eyebrow + chip ZURI
+ *               ESPECIAL + tarjeta de jornada + hint + banner sugerencia).
  *
- * Estados:
- *   - PUBLICADA: header + banner opcional + CTA "INICIAR JORNADA" (abre modal).
- *   - ACTIVA:    header + cronometro + declaradas/detectadas + color parada
- *                + banner opcional (hora_fin+60min) + CTA "FINALIZAR JORNADA".
- *
- * El color de parada se calcula LOCALMENTE con el GPS del store (visual).
- * El backend (paradaDetector) tiene la verdad y actualiza paradas_detectadas.
+ * Datos consumidos (del backend, en servicios[0].jornada):
+ *   turno, cliente_nombre, doctor_nombre,
+ *   hora_inicio_planeada, hora_fin_planeada,
+ *   paradas_declaradas, paradas_detectadas,
+ *   inicio_real_at, fin_real_at, sugerencia_inicio_at,
+ *   distrito (opcional — ver nota al final del archivo).
  *
  * NEMT no se toca: ese flujo sigue en JornadaActivaView con el BottomSheet
  * clasico del index.tsx.
@@ -79,6 +75,21 @@ interface JornadaFaseE {
     paradas_declaradas?: number | null;
     paradas_detectadas?: number;
     sugerencia_inicio_at?: string | null;
+    // PASO 1.B — campo opcional (ver nota al final del archivo).
+    distrito?: string | null;
+}
+
+// ── Row helper para la tarjeta de jornada (PASO 1.B) ────────────────────
+function JornadaRow({ icon, label, value }: { icon: string; label: string; value: string }) {
+    return (
+        <View style={s.jrnRow}>
+            <Text style={s.jrnRowIcon}>{icon}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={s.jrnRowLabel}>{label}</Text>
+                <Text style={s.jrnRowValue} numberOfLines={1}>{value}</Text>
+            </View>
+        </View>
+    );
 }
 
 export function JornadaEspecialView({ servicios, onRefresh }: Props) {
@@ -102,7 +113,7 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
     }, [jornada?.estado]);
 
     // ── Color progresivo (local) ────────────────────────────────────
-    const currentLocation = useLocationStore(s => s.currentLocation);
+    const currentLocation = useLocationStore(st => st.currentLocation);
     const [ancla, setAncla] = useState<{ lat: number; lng: number; since: number } | null>(null);
 
     useEffect(() => {
@@ -220,6 +231,19 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
     const inicioMs = jornada.inicio_real_at ? new Date(jornada.inicio_real_at).getTime() : null;
     const duracionTx = inicioMs ? fmtDur(now - inicioMs) : '—';
 
+    // PASO 1.B — valores derivados del estado PRE-INICIO
+    const clienteBadge = (jornada.cliente_nombre || 'JORNADA').toUpperCase();
+    const horarioTx =
+        jornada.hora_inicio_planeada && jornada.hora_fin_planeada
+            ? `${jornada.hora_inicio_planeada} – ${jornada.hora_fin_planeada}`
+            : jornada.hora_inicio_planeada
+                ? `Desde ${jornada.hora_inicio_planeada}`
+                : '—';
+    const zonaTx = jornada.distrito ?? '—';
+    const paradasTx = jornada.paradas_declaradas != null
+        ? String(jornada.paradas_declaradas)
+        : '—';
+
     // ── CTA anclado al borde inferior del sheet ──────────────────────────
     const renderFooter = useCallback((props: BottomSheetFooterProps) => (
         <BottomSheetFooter {...props} bottomInset={insets.bottom}>
@@ -229,16 +253,18 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                         style={[s.btn, s.btnPrimary, loading && s.btnDisabled]}
                         onPress={handleIniciar}
                         disabled={loading}
+                        activeOpacity={0.9}
                     >
-                        {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.btnTx}>INICIAR JORNADA</Text>}
+                        {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.btnTx}>Iniciar jornada</Text>}
                     </TouchableOpacity>
                 ) : esActiva ? (
                     <TouchableOpacity
                         style={[s.btn, s.btnDanger, loading && s.btnDisabled]}
                         onPress={handleFinalizar}
                         disabled={loading}
+                        activeOpacity={0.9}
                     >
-                        {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.btnTx}>FINALIZAR JORNADA</Text>}
+                        {loading ? <ActivityIndicator color="#fff" /> : <Text style={s.btnTx}>Finalizar jornada</Text>}
                     </TouchableOpacity>
                 ) : null}
             </View>
@@ -258,44 +284,89 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                 footerComponent={renderFooter}
             >
                 <BottomSheetScrollView contentContainerStyle={s.scrollContent}>
-                    {/* Header */}
-                    <View style={s.header}>
-                        <Text style={s.headerLabel}>
-                            {esActiva ? 'JORNADA ACTIVA' : 'TU JORNADA HOY'}
-                        </Text>
-                        <Text style={s.doctor} numberOfLines={1}>
-                            Dr. {jornada.doctor_nombre || '—'}
-                        </Text>
-                        <Text style={s.cliente} numberOfLines={1}>
-                            {jornada.cliente_nombre || 'Sin cliente'}
-                            {jornada.turno ? ` · Turno ${jornada.turno}` : ''}
-                        </Text>
-                    </View>
 
-                    {/* Banner sugerencia_inicio (PUBLICADA + GPS se movio) */}
-                    {esPublicada && jornada.sugerencia_inicio_at && (
-                        <View style={s.banner}>
-                            <Text style={s.bannerTx}>¿Ya iniciaste tu jornada?</Text>
-                        </View>
-                    )}
-
-                    {/* T1.6: Banner recordatorio FIN (ACTIVA + hora_fin + 60 min pasado) */}
-                    {esActiva && jornada.hora_fin_planeada && (() => {
-                        const [hh, mm] = jornada.hora_fin_planeada.split(':').map(Number);
-                        const finPlan = new Date();
-                        finPlan.setHours(hh, mm, 0, 0);
-                        const vencido = Date.now() - finPlan.getTime() > 60 * 60 * 1000;
-                        if (!vencido) return null;
-                        return (
-                            <View style={[s.banner, { backgroundColor: '#FEE2E2', borderLeftColor: '#DC2626' }]}>
-                                <Text style={[s.bannerTx, { color: '#991B1B' }]}>¿Terminaste tu jornada? Supero la hora planeada en +60 min.</Text>
-                            </View>
-                        );
-                    })()}
-
-                    {/* Estado ACTIVA: cronometro + contadores + color parada */}
-                    {esActiva && (
+                    {esPublicada ? (
+                        // ─── PASO 1.B · ESTADO PRE-INICIO ────────────────────
                         <>
+                            {/* Eyebrow + chip ZURI ESPECIAL */}
+                            <View style={s.eyebrowRow}>
+                                <Text style={s.eyebrow}>Tu jornada de hoy</Text>
+                                <View style={s.chipZuri}>
+                                    <Text style={s.chipZuriTx}>ZURI ESPECIAL</Text>
+                                </View>
+                            </View>
+                            <Text style={s.turnoTitle}>
+                                {jornada.turno ? `Turno ${jornada.turno}` : 'Jornada ESPECIAL'}
+                            </Text>
+
+                            {/* Tarjeta de jornada */}
+                            <View style={s.jornadaCard}>
+                                <View style={s.jornadaCardHead}>
+                                    <View style={s.clienteBadge}>
+                                        <Text style={s.clienteBadgeTx}>{clienteBadge}</Text>
+                                    </View>
+                                    <Text style={s.jornadaSub}>Transporte de personal médico</Text>
+                                </View>
+
+                                <View style={s.jornadaCardBody}>
+                                    <JornadaRow icon="🕒" label="Horario planeado" value={horarioTx} />
+                                    <View style={s.jrnSep} />
+                                    <JornadaRow icon="📍" label="Zona" value={zonaTx} />
+                                    <View style={s.jrnSep} />
+                                    <JornadaRow icon="🧭" label="Paradas planeadas" value={paradasTx} />
+                                    {jornada.doctor_nombre && (
+                                        <>
+                                            <View style={s.jrnSep} />
+                                            <JornadaRow icon="🩺" label="Doctor" value={`Dr. ${jornada.doctor_nombre}`} />
+                                        </>
+                                    )}
+                                </View>
+                            </View>
+
+                            {/* Hint "estás en línea" */}
+                            <View style={s.hintBox}>
+                                <View style={s.hintDot} />
+                                <Text style={s.hintTx}>
+                                    Estás en línea. Inicia cuando salgas de la cochera.
+                                </Text>
+                            </View>
+
+                            {/* Banner sugerencia_inicio_at (GPS detectó movimiento) */}
+                            {jornada.sugerencia_inicio_at && (
+                                <View style={s.banner}>
+                                    <Text style={s.bannerTx}>¿Ya iniciaste tu jornada?</Text>
+                                </View>
+                            )}
+                        </>
+                    ) : (
+                        // ─── Estado ACTIVA — se rediseña en PASO 1.C ─────────
+                        <>
+                            <View style={s.header}>
+                                <Text style={s.headerLabel}>JORNADA ACTIVA</Text>
+                                <Text style={s.doctor} numberOfLines={1}>
+                                    Dr. {jornada.doctor_nombre || '—'}
+                                </Text>
+                                <Text style={s.cliente} numberOfLines={1}>
+                                    {jornada.cliente_nombre || 'Sin cliente'}
+                                    {jornada.turno ? ` · Turno ${jornada.turno}` : ''}
+                                </Text>
+                            </View>
+
+                            {/* T1.6: Banner recordatorio FIN (ACTIVA + hora_fin + 60 min pasado) */}
+                            {jornada.hora_fin_planeada && (() => {
+                                const [hh, mm] = jornada.hora_fin_planeada.split(':').map(Number);
+                                const finPlan = new Date();
+                                finPlan.setHours(hh, mm, 0, 0);
+                                const vencido = Date.now() - finPlan.getTime() > 60 * 60 * 1000;
+                                if (!vencido) return null;
+                                return (
+                                    <View style={[s.banner, { backgroundColor: '#FEE2E2', borderLeftColor: '#DC2626' }]}>
+                                        <Text style={[s.bannerTx, { color: '#991B1B' }]}>¿Terminaste tu jornada? Supero la hora planeada en +60 min.</Text>
+                                    </View>
+                                );
+                            })()}
+
+                            {/* Cronometro + contadores + color parada */}
                             <View style={s.card}>
                                 <Text style={s.cardLabel}>Inicio</Text>
                                 <Text style={s.cardVal}>
@@ -323,10 +394,11 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                             )}
                         </>
                     )}
+
                 </BottomSheetScrollView>
             </BottomSheet>
 
-            {/* Modal: cuantas paradas */}
+            {/* Modal: cuantas paradas (reusado de pre-APK111, idéntico) */}
             <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
                 <View style={s.modalBg}>
                     <View style={s.modalCard}>
@@ -361,10 +433,19 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
     );
 }
 
+/**
+ * NOTA PASO 1.B — campo `distrito`:
+ * JornadaInfo (types/servicios.ts) todavía no lo exporta. Mientras tanto
+ * la UI muestra "—" si no viene. Para completar la fila "Zona" con el
+ * distrito real: en el backend `/api/driver/servicios` incluir el campo
+ * `jornadas.distrito_nombre` en la jornada embedded. (Fuera del alcance
+ * de este sub-step; agrega al PASO 2 o a backend por separado.)
+ */
+
 const s = StyleSheet.create({
     scrollContent: {
         padding: 16,
-        // El footer anclado ocupa ~84px (btn 56 + padding 16+14 + safe-area).
+        // El footer anclado ocupa ~84px (btn 56 + padding 10+14 + safe-area).
         // Reservamos ese espacio al final para que el scroll no quede bajo el CTA.
         paddingBottom: 120,
     },
@@ -374,6 +455,7 @@ const s = StyleSheet.create({
     },
     emptyTx: { color: '#6B7280', fontSize: 14 },
 
+    // ── Header ACTIVA (legacy, se rediseña en 1.C) ──────────────────────
     header: { marginBottom: 12 },
     headerLabel: {
         fontSize: 10,
@@ -385,6 +467,138 @@ const s = StyleSheet.create({
     doctor: { fontSize: 18, fontWeight: '800', color: '#0B1F3A' },
     cliente: { fontSize: 13, color: '#4B5563', marginTop: 2 },
 
+    // ── PASO 1.B — Eyebrow + chip ZURI + turno title ───────────────────
+    eyebrowRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        marginBottom: 4,
+    },
+    eyebrow: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#737f90',
+        letterSpacing: 0.6,
+        textTransform: 'uppercase',
+    },
+    chipZuri: {
+        backgroundColor: '#eaeffc',
+        borderRadius: 999,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+    },
+    chipZuriTx: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: '#2f54eb',
+        letterSpacing: 0.8,
+    },
+    turnoTitle: {
+        fontSize: 22,
+        fontWeight: '800',
+        color: '#0e1726',
+        letterSpacing: -0.3,
+        marginBottom: 14,
+    },
+
+    // ── PASO 1.B — Tarjeta de jornada ──────────────────────────────────
+    jornadaCard: {
+        backgroundColor: '#ffffff',
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: '#eef1f7',
+        marginBottom: 14,
+        overflow: 'hidden',
+        shadowColor: '#0e1726',
+        shadowOpacity: 0.04,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 1,
+    },
+    jornadaCardHead: {
+        paddingHorizontal: 14,
+        paddingTop: 14,
+        paddingBottom: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: '#f1f4f9',
+    },
+    clienteBadge: {
+        alignSelf: 'flex-start',
+        backgroundColor: '#0e1726',
+        borderRadius: 6,
+        paddingHorizontal: 8,
+        paddingVertical: 3,
+        marginBottom: 6,
+    },
+    clienteBadgeTx: {
+        fontSize: 10,
+        fontWeight: '800',
+        color: '#ffffff',
+        letterSpacing: 0.8,
+    },
+    jornadaSub: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#3a4656',
+    },
+    jornadaCardBody: {
+        paddingHorizontal: 14,
+        paddingVertical: 4,
+    },
+    jrnRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingVertical: 10,
+        gap: 10,
+    },
+    jrnRowIcon: {
+        fontSize: 17,
+        width: 24,
+        textAlign: 'center',
+    },
+    jrnRowLabel: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#737f90',
+        letterSpacing: 0.4,
+        textTransform: 'uppercase',
+    },
+    jrnRowValue: {
+        fontSize: 15,
+        fontWeight: '700',
+        color: '#0e1726',
+        marginTop: 1,
+        fontVariant: ['tabular-nums'],
+    },
+    jrnSep: {
+        height: 1,
+        backgroundColor: '#f1f4f9',
+    },
+
+    // ── PASO 1.B — Hint "estás en línea" ───────────────────────────────
+    hintBox: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        padding: 12,
+        borderRadius: 12,
+        backgroundColor: '#e6f6ee',
+        marginBottom: 10,
+    },
+    hintDot: {
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: '#0f9d63',
+    },
+    hintTx: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#065f46',
+        flex: 1,
+    },
+
+    // ── Banner amarillo (sugerencia_inicio_at) ─────────────────────────
     banner: {
         backgroundColor: '#FEF3C7',
         borderLeftWidth: 3,
@@ -395,6 +609,7 @@ const s = StyleSheet.create({
     },
     bannerTx: { fontSize: 13, fontWeight: '700', color: '#92400E' },
 
+    // ── Cards estado ACTIVA (legacy, se rediseña en 1.C) ───────────────
     card: {
         backgroundColor: '#fff',
         borderRadius: 10,
@@ -409,10 +624,8 @@ const s = StyleSheet.create({
     },
     cardVal: { fontSize: 15, fontWeight: '700', color: '#0B1F3A', marginTop: 4 },
     cardBig: { fontSize: 28, fontWeight: '800', color: '#0B1F3A', marginTop: 4, fontVariant: ['tabular-nums'] },
-
     row: { flexDirection: 'row', gap: 10, marginBottom: 10 },
     rowCard: { flex: 1 },
-
     estadoParada: {
         borderRadius: 10,
         padding: 14,
@@ -421,8 +634,7 @@ const s = StyleSheet.create({
     },
     estadoParadaTx: { fontSize: 14, fontWeight: '800', letterSpacing: 0.3 },
 
-    // Footer anclado — vive dentro de BottomSheetFooter, sin borde superior
-    // propio (lo da la sombra del sheet). padding horizontal 16, vertical 12.
+    // ── Footer anclado (CTA) — compartido con 1.A ──────────────────────
     footer: {
         paddingHorizontal: 16,
         paddingTop: 10,
@@ -430,14 +642,20 @@ const s = StyleSheet.create({
     },
     btn: {
         paddingVertical: 16,
-        borderRadius: 10,
+        borderRadius: 16,
         alignItems: 'center',
+        shadowColor: '#0e1726',
+        shadowOpacity: 0.08,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 2,
     },
-    btnPrimary: { backgroundColor: '#00875A' },
-    btnDanger: { backgroundColor: '#DC2626' },
+    btnPrimary: { backgroundColor: '#0f9d63' },
+    btnDanger: { backgroundColor: '#e04646' },
     btnDisabled: { opacity: 0.6 },
-    btnTx: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.5 },
+    btnTx: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
 
+    // ── Modal paradas (idéntico a pre-APK111) ──────────────────────────
     modalBg: {
         flex: 1,
         backgroundColor: 'rgba(15,23,42,0.55)',
@@ -465,7 +683,7 @@ const s = StyleSheet.create({
     modalBtnRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
     modalBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 },
     modalBtnGhost: { backgroundColor: 'transparent' },
-    modalBtnPrimary: { backgroundColor: '#00875A' },
+    modalBtnPrimary: { backgroundColor: '#0f9d63' },
     modalBtnGhostTx: { color: '#6B7280', fontWeight: '700' },
     modalBtnPrimaryTx: { color: '#fff', fontWeight: '800' },
 });
