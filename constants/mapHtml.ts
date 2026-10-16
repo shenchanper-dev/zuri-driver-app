@@ -126,10 +126,14 @@ export const MAP_HTML = `<!DOCTYPE html>
                 doubleClickZoom: true,
             }).setView([DEFAULT_LAT, DEFAULT_LNG], DEFAULT_ZOOM);
 
-            L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
-                maxZoom: 20,
-                subdomains: 'abcd',
-                attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+            // Esri World Light Gray Base — gris limpio tipo Positron, sin API key.
+            // CARTO fue reemplazado tras confirmar que su endpoint anónimo devuelve
+            // watermark "API KEY REQUIRED". Esri sirve z0-16 nativamente; Leaflet
+            // sobre-escala hasta z19 para nivel calle. Orden path: {z}/{y}/{x}.
+            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri',
+                maxNativeZoom: 16,
+                maxZoom: 19,
             }).addTo(map);
 
             // ── Pin ZURI verde (anillo blanco + sombra) — mockup APK 111 ──
