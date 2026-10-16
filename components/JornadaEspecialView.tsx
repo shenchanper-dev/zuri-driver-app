@@ -3,13 +3,9 @@
  *
  * APK 111:
  *  · PASO 1.A: BottomSheet self-contained + CTA anclado (BottomSheetFooter).
- *  · PASO 1.B: estado PRE-INICIO con jerarquia densa (eyebrow + chip +
- *               tarjeta + hint + banner sugerencia).
- *  · PASO 1.C: estado ACTIVA — header + métrica principal con cronómetro,
- *               fila Declaradas/Detectadas/Zona, línea de movimiento,
- *               timeline de paradas detectadas, CTA rojo "Finalizar jornada".
- *  · PASO 1.D: estado RESUMEN (post-finalizar) con grid de métricas y CTA
- *               "Listo" que vuelve a reset.
+ *  · PASO 1.B: estado PRE-INICIO (eyebrow + tarjeta + hint).
+ *  · PASO 1.C: estado ACTIVA (hero cronómetro + métricas + timeline).
+ *  · PASO 1.D: estado RESUMEN post-finalizar (check + grid + CTA Listo).
  *
  * NEMT no se toca: ese flujo sigue en JornadaActivaView.
  */
@@ -29,11 +25,10 @@ import { driverApi } from '@/services/api';
 import { useLocationStore } from '@/stores/location';
 
 interface Props {
-    servicios: Servicio[]; // Todos los servicios con la misma jornada (puede ser 1 en ESPECIAL)
+    servicios: Servicio[];
     onRefresh: () => void;
 }
 
-// Distancia haversine en metros
 function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
     const R = 6371000;
     const toRad = (d: number) => (d * Math.PI) / 180;
@@ -52,13 +47,27 @@ function fmtDur(ms: number): string {
     return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
+function fmtDurMin(min: number | null | undefined): string {
+    if (min == null) return '—';
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
 function fmtHora(iso: string | null | undefined): string {
     if (!iso) return '—';
     const d = new Date(iso);
     return d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-// ── Paradas detectadas (opcional en payload — ver nota al final) ─────────
+function fmtFechaLarga(iso: string | null | undefined): string {
+    if (!iso) return '—';
+    const d = new Date(iso);
+    return d.toLocaleDateString('es-PE', {
+        weekday: 'long', day: 'numeric', month: 'long',
+    });
+}
+
 interface ParadaDetectada {
     id: number;
     lat?: number;
@@ -86,13 +95,23 @@ interface JornadaFaseE {
     paradas_declaradas?: number | null;
     paradas_detectadas?: number;
     sugerencia_inicio_at?: string | null;
-    // PASO 1.B — campo opcional distrito.
     distrito?: string | null;
-    // PASO 1.C — timeline opcional desde backend.
     paradas_detectadas_list?: ParadaDetectada[];
 }
 
-// ── Row helper para la tarjeta de jornada (PASO 1.B) ────────────────────
+// Payload del backend al finalizar (POST /api/v3/jornadas/:id/finalizar).
+interface JornadaResumenApi {
+    id?: number;
+    cliente_nombre?: string | null;
+    turno?: string | null;
+    inicio_real_at?: string | null;
+    fin_real_at?: string | null;
+    duracion_min?: number | null;
+    paradas_declaradas?: number | null;
+    paradas_detectadas?: number;
+}
+
+// ── Helpers UI ──────────────────────────────────────────────────────────
 function JornadaRow({ icon, label, value }: { icon: string; label: string; value: string }) {
     return (
         <View style={s.jrnRow}>
@@ -105,7 +124,6 @@ function JornadaRow({ icon, label, value }: { icon: string; label: string; value
     );
 }
 
-// ── Tile métrica (PASO 1.C) ─────────────────────────────────────────────
 function MetricTile({ label, value, big = true }: { label: string; value: string; big?: boolean }) {
     return (
         <View style={s.metricCard}>
@@ -113,6 +131,16 @@ function MetricTile({ label, value, big = true }: { label: string; value: string
             <Text style={big ? s.metricCardValueBig : s.metricCardValueSmall} numberOfLines={1}>
                 {value}
             </Text>
+        </View>
+    );
+}
+
+// PASO 1.D — tile del grid de resumen (2 por fila, radius 15, label + value).
+function ResumenTile({ label, value }: { label: string; value: string }) {
+    return (
+        <View style={s.resumenTile}>
+            <Text style={s.resumenLabel}>{label}</Text>
+            <Text style={s.resumenValue} numberOfLines={1}>{value}</Text>
         </View>
     );
 }
@@ -127,17 +155,18 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
     const [loading, setLoading] = useState(false);
     const [now, setNow] = useState(Date.now());
 
+    // PASO 1.D — resumen local post-finalizar (sobrevive hasta tap "Listo").
+    const [resumenJornada, setResumenJornada] = useState<JornadaResumenApi | null>(null);
+
     const bsRef = useRef<BottomSheet>(null);
     const snapPoints = useMemo(() => ['16%', '46%', '86%'], []);
 
-    // Cronometro: tick 1s solo cuando ACTIVA — reutilizado por métrica hero
     useEffect(() => {
         if (jornada?.estado !== 'ACTIVA') return;
         const iv = setInterval(() => setNow(Date.now()), 1000);
         return () => clearInterval(iv);
     }, [jornada?.estado]);
 
-    // ── Color progresivo (local) ────────────────────────────────────
     const currentLocation = useLocationStore(st => st.currentLocation);
     const [ancla, setAncla] = useState<{ lat: number; lng: number; since: number } | null>(null);
 
@@ -158,7 +187,6 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
     const minutosDetenido = ancla ? Math.floor((now - ancla.since) / 60000) : 0;
     const gpsDisponible = !!currentLocation;
 
-    // Línea de movimiento (PASO 1.C) — simplificado al vocabulario del mockup.
     const movimiento = useMemo(() => {
         if (jornada?.estado !== 'ACTIVA') return null;
         if (!gpsDisponible) {
@@ -167,7 +195,6 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
         if (minutosDetenido < 1) {
             return { bg: '#e6f6ee', fg: '#0b7d4e', dot: '#0f9d63', label: 'En movimiento' };
         }
-        // Detenido en zona (zona = distrito si lo tenemos)
         const zona = jornada?.distrito ? ` en ${jornada.distrito}` : '';
         if (minutosDetenido < 15) {
             return {
@@ -175,7 +202,6 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
                 label: `Detenido ${minutosDetenido}m${zona}`,
             };
         }
-        // Visita larga (>=15 min) — operativamente útil, lo marcamos verde.
         return {
             bg: '#e6f6ee', fg: '#0b7d4e', dot: '#0f9d63',
             label: `Con un paciente · ${minutosDetenido}m${zona}`,
@@ -201,6 +227,7 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
         }
     }, [jornadaId, onRefresh]);
 
+    // PASO 1.D — Confirmación → finalizar → mostrar RESUMEN (sin Alert extra).
     const handleFinalizar = useCallback(() => {
         if (!jornadaId) return;
         Alert.alert(
@@ -215,27 +242,19 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
                         setLoading(true);
                         try {
                             const res: any = await driverApi.finalizarJornada(jornadaId);
-                            const resumen = res?.resumen?.jornada;
-                            if (resumen) {
-                                const inicio = resumen.inicio_real_at
-                                    ? new Date(resumen.inicio_real_at).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false })
-                                    : '—';
-                                const fin = resumen.fin_real_at
-                                    ? new Date(resumen.fin_real_at).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false })
-                                    : '—';
-                                const dur = resumen.duracion_min != null ? `${Math.floor(resumen.duracion_min/60)}h ${resumen.duracion_min%60}m` : '—';
-                                Alert.alert(
-                                    'Jornada completada',
-                                    `Inicio: ${inicio}
-Fin: ${fin}
-Duracion: ${dur}
-Declaradas: ${resumen.paradas_declaradas ?? '—'}
-Detectadas: ${resumen.paradas_detectadas ?? 0}`,
-                                    [{ text: 'Listo', onPress: () => onRefresh() }],
-                                );
-                            } else {
-                                onRefresh();
-                            }
+                            const resumen = res?.resumen?.jornada as JornadaResumenApi | undefined;
+                            // Fallback: si el backend no devuelve resumen, armamos uno con lo que tenemos.
+                            setResumenJornada(resumen ?? {
+                                cliente_nombre: jornada?.cliente_nombre ?? null,
+                                turno: jornada?.turno ?? null,
+                                inicio_real_at: jornada?.inicio_real_at ?? null,
+                                fin_real_at: new Date().toISOString(),
+                                duracion_min: jornada?.inicio_real_at
+                                    ? Math.floor((Date.now() - new Date(jornada.inicio_real_at).getTime()) / 60000)
+                                    : null,
+                                paradas_declaradas: jornada?.paradas_declaradas ?? null,
+                                paradas_detectadas: jornada?.paradas_detectadas ?? 0,
+                            });
                         } catch (e: any) {
                             Alert.alert('Error', e?.message || 'No se pudo finalizar.');
                         } finally {
@@ -245,10 +264,17 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                 },
             ],
         );
-    }, [jornadaId, jornada?.paradas_detectadas, onRefresh]);
+    }, [jornadaId, jornada, onRefresh]);
 
-    // ── Empty state (sin jornada) ──────────────────────────────────
-    if (!jornada) {
+    // PASO 1.D — Tap "Listo" → cierra resumen y refresca estado padre
+    const handleListo = useCallback(() => {
+        setResumenJornada(null);
+        onRefresh();
+    }, [onRefresh]);
+
+    // ── Empty state ────────────────────────────────────────────────
+    // Si hay resumen local → se renderiza más abajo (sobrevive al cambio de jornada).
+    if (!jornada && !resumenJornada) {
         return (
             <BottomSheet
                 ref={bsRef}
@@ -266,34 +292,41 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
         );
     }
 
-    const esActiva = jornada.estado === 'ACTIVA';
-    const esPublicada = jornada.estado === 'PUBLICADA';
-    const inicioMs = jornada.inicio_real_at ? new Date(jornada.inicio_real_at).getTime() : null;
+    const esActiva = jornada?.estado === 'ACTIVA';
+    const esPublicada = jornada?.estado === 'PUBLICADA';
+    const esResumen = !!resumenJornada;
+    const inicioMs = jornada?.inicio_real_at ? new Date(jornada.inicio_real_at).getTime() : null;
     const duracionTx = inicioMs ? fmtDur(now - inicioMs) : '—';
 
-    // ── PASO 1.B — valores PRE-INICIO
-    const clienteBadge = (jornada.cliente_nombre || 'JORNADA').toUpperCase();
+    const clienteBadge = (jornada?.cliente_nombre || 'JORNADA').toUpperCase();
     const horarioTx =
-        jornada.hora_inicio_planeada && jornada.hora_fin_planeada
+        jornada?.hora_inicio_planeada && jornada?.hora_fin_planeada
             ? `${jornada.hora_inicio_planeada} – ${jornada.hora_fin_planeada}`
-            : jornada.hora_inicio_planeada
+            : jornada?.hora_inicio_planeada
                 ? `Desde ${jornada.hora_inicio_planeada}`
                 : '—';
-    const zonaTx = jornada.distrito ?? '—';
-    const paradasTx = jornada.paradas_declaradas != null
+    const zonaTx = jornada?.distrito ?? '—';
+    const paradasTx = jornada?.paradas_declaradas != null
         ? String(jornada.paradas_declaradas)
         : '—';
 
-    // ── PASO 1.C — timeline paradas detectadas
-    const paradasList: ParadaDetectada[] = Array.isArray(jornada.paradas_detectadas_list)
-        ? jornada.paradas_detectadas_list
+    const paradasList: ParadaDetectada[] = Array.isArray(jornada?.paradas_detectadas_list)
+        ? jornada!.paradas_detectadas_list!
         : [];
 
-    // ── CTA anclado al borde inferior del sheet ──────────────────────────
+    // ── CTA anclado — label + color según estado ──────────────────────────
     const renderFooter = useCallback((props: BottomSheetFooterProps) => (
         <BottomSheetFooter {...props} bottomInset={insets.bottom}>
             <View style={[s.footer, { paddingBottom: 14 }]}>
-                {esPublicada ? (
+                {esResumen ? (
+                    <TouchableOpacity
+                        style={[s.btn, s.btnBrand]}
+                        onPress={handleListo}
+                        activeOpacity={0.9}
+                    >
+                        <Text style={s.btnTx}>Listo</Text>
+                    </TouchableOpacity>
+                ) : esPublicada ? (
                     <TouchableOpacity
                         style={[s.btn, s.btnPrimary, loading && s.btnDisabled]}
                         onPress={handleIniciar}
@@ -314,7 +347,7 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                 ) : null}
             </View>
         </BottomSheetFooter>
-    ), [insets.bottom, esPublicada, esActiva, loading, handleIniciar, handleFinalizar]);
+    ), [insets.bottom, esResumen, esPublicada, esActiva, loading, handleListo, handleIniciar, handleFinalizar]);
 
     return (
         <>
@@ -330,10 +363,54 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
             >
                 <BottomSheetScrollView contentContainerStyle={s.scrollContent}>
 
-                    {esPublicada ? (
+                    {esResumen && resumenJornada ? (
+                        // ─── PASO 1.D · ESTADO RESUMEN ───────────────────────
+                        <>
+                            <View style={s.successBlock}>
+                                <View style={s.checkCircle}>
+                                    <Text style={s.checkCircleTx}>✓</Text>
+                                </View>
+                                <Text style={s.successTitle}>Jornada finalizada</Text>
+                                <Text style={s.successSub} numberOfLines={2}>
+                                    {resumenJornada.cliente_nombre || 'Jornada ESPECIAL'}
+                                    {resumenJornada.turno ? ` · Turno ${resumenJornada.turno}` : ''}
+                                </Text>
+                                <Text style={s.successFecha}>
+                                    {fmtFechaLarga(resumenJornada.fin_real_at ?? resumenJornada.inicio_real_at)}
+                                </Text>
+                            </View>
+
+                            {/* Grid 2x3: Duración / Inicio / Fin / Declaradas / Detectadas */}
+                            <View style={s.resumenGrid}>
+                                <ResumenTile
+                                    label="Duración total"
+                                    value={fmtDurMin(resumenJornada.duracion_min)}
+                                />
+                                <ResumenTile
+                                    label="Inicio"
+                                    value={fmtHora(resumenJornada.inicio_real_at)}
+                                />
+                                <ResumenTile
+                                    label="Fin"
+                                    value={fmtHora(resumenJornada.fin_real_at)}
+                                />
+                                <ResumenTile
+                                    label="Declaradas"
+                                    value={resumenJornada.paradas_declaradas != null ? String(resumenJornada.paradas_declaradas) : '—'}
+                                />
+                                <ResumenTile
+                                    label="Detectadas"
+                                    value={String(resumenJornada.paradas_detectadas ?? 0)}
+                                />
+                            </View>
+
+                            <Text style={s.resumenHint}>
+                                La jornada queda disponible en Historial.
+                            </Text>
+                        </>
+                    ) : esPublicada && jornada ? (
                         // ─── PASO 1.B · ESTADO PRE-INICIO ────────────────────
                         <>
-                            {/* Eyebrow + chip ZURI ESPECIAL */}
                             <View style={s.eyebrowRow}>
                                 <Text style={s.eyebrow}>Tu jornada de hoy</Text>
                                 <View style={s.chipZuri}>
@@ -344,7 +421,6 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                                 {jornada.turno ? `Turno ${jornada.turno}` : 'Jornada ESPECIAL'}
                             </Text>
 
-                            {/* Tarjeta de jornada */}
                             <View style={s.jornadaCard}>
                                 <View style={s.jornadaCardHead}>
                                     <View style={s.clienteBadge}>
@@ -368,7 +444,6 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                                 </View>
                             </View>
 
-                            {/* Hint "estás en línea" */}
                             <View style={s.hintBox}>
                                 <View style={s.hintDot} />
                                 <Text style={s.hintTx}>
@@ -376,17 +451,15 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                                 </Text>
                             </View>
 
-                            {/* Banner sugerencia_inicio_at */}
                             {jornada.sugerencia_inicio_at && (
                                 <View style={s.banner}>
                                     <Text style={s.bannerTx}>¿Ya iniciaste tu jornada?</Text>
                                 </View>
                             )}
                         </>
-                    ) : esActiva ? (
+                    ) : esActiva && jornada ? (
                         // ─── PASO 1.C · ESTADO ACTIVO ────────────────────────
                         <>
-                            {/* Header jornada */}
                             <View style={s.eyebrowRow}>
                                 <Text style={[s.eyebrow, { color: '#0f9d63' }]}>JORNADA ACTIVA</Text>
                                 <View style={s.chipZuri}>
@@ -398,7 +471,6 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                                 {jornada.turno ? ` · Turno ${jornada.turno}` : ''}
                             </Text>
 
-                            {/* Métrica principal: cronómetro vivo (full-width) */}
                             <View style={s.hero}>
                                 <Text style={s.heroLabel}>En curso</Text>
                                 <Text style={s.heroValue}>{duracionTx}</Text>
@@ -407,7 +479,6 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                                 </Text>
                             </View>
 
-                            {/* Fila declaradas / detectadas / zona */}
                             <View style={s.metricRow}>
                                 <MetricTile
                                     label="Declaradas"
@@ -424,7 +495,6 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                                 />
                             </View>
 
-                            {/* Línea de movimiento */}
                             {movimiento && (
                                 <View style={[s.movementBox, { backgroundColor: movimiento.bg }]}>
                                     <View style={[s.movementDot, { backgroundColor: movimiento.dot }]} />
@@ -434,7 +504,6 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                                 </View>
                             )}
 
-                            {/* Banner T1.6: recordatorio FIN (hora_fin + 60 min pasado) */}
                             {jornada.hora_fin_planeada && (() => {
                                 const [hh, mm] = jornada.hora_fin_planeada.split(':').map(Number);
                                 const finPlan = new Date();
@@ -448,7 +517,6 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                                 );
                             })()}
 
-                            {/* Timeline paradas detectadas */}
                             <Text style={s.sectionTitle}>Paradas detectadas</Text>
                             {paradasList.length === 0 ? (
                                 <View style={s.timelineEmpty}>
@@ -489,7 +557,7 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                 </BottomSheetScrollView>
             </BottomSheet>
 
-            {/* Modal: cuantas paradas (reusado) */}
+            {/* Modal paradas (reusado) */}
             <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
                 <View style={s.modalBg}>
                     <View style={s.modalCard}>
@@ -525,384 +593,238 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
 }
 
 /**
- * NOTA deuda — campos opcionales del backend:
- *   · `distrito` (jornada.distrito_nombre) → fila Zona en PRE-INICIO + ACTIVA.
- *   · `paradas_detectadas_list` (lista paradas_detectadas) → timeline ACTIVA.
- * Ambos se muestran con fallback "—" / empty-state hasta que el backend
- * `/api/driver/servicios` los incluya en jornada embedded. El admin
- * `/api/v3/jornadas/activas` ya los expone (fuente para portar).
+ * NOTA deuda — campos opcionales del backend driver:
+ *   · `distrito` (jornada.distrito_nombre) → fila Zona.
+ *   · `paradas_detectadas_list` → timeline ACTIVA.
+ * Admin `/api/v3/jornadas/activas` ya los expone; portar al endpoint del
+ * driver (`/api/driver/servicios`) para habilitar la vista completa.
  */
 
 const s = StyleSheet.create({
-    scrollContent: {
-        padding: 16,
-        // Reserva para que el scroll no quede bajo el CTA anclado (~84px + safe-area).
-        paddingBottom: 120,
-    },
-    emptyScroll: {
-        padding: 24,
-        alignItems: 'center',
-    },
+    scrollContent: { padding: 16, paddingBottom: 120 },
+    emptyScroll: { padding: 24, alignItems: 'center' },
     emptyTx: { color: '#6B7280', fontSize: 14 },
 
-    // ── Eyebrow + chip ZURI + turno title ──────────────────────────────
     eyebrowRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        marginBottom: 4,
+        flexDirection: 'row', alignItems: 'center',
+        justifyContent: 'space-between', marginBottom: 4,
     },
     eyebrow: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: '#737f90',
-        letterSpacing: 0.6,
-        textTransform: 'uppercase',
+        fontSize: 11, fontWeight: '700', color: '#737f90',
+        letterSpacing: 0.6, textTransform: 'uppercase',
     },
     chipZuri: {
-        backgroundColor: '#eaeffc',
-        borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
+        backgroundColor: '#eaeffc', borderRadius: 999,
+        paddingHorizontal: 10, paddingVertical: 4,
     },
     chipZuriTx: {
-        fontSize: 10,
-        fontWeight: '800',
-        color: '#2f54eb',
-        letterSpacing: 0.8,
+        fontSize: 10, fontWeight: '800', color: '#2f54eb', letterSpacing: 0.8,
     },
     turnoTitle: {
-        fontSize: 22,
-        fontWeight: '800',
-        color: '#0e1726',
-        letterSpacing: -0.3,
-        marginBottom: 14,
+        fontSize: 22, fontWeight: '800', color: '#0e1726',
+        letterSpacing: -0.3, marginBottom: 14,
     },
 
-    // ── PRE-INICIO: Tarjeta de jornada ─────────────────────────────────
+    // ── Tarjeta de jornada ────────────────────────────────────────────
     jornadaCard: {
-        backgroundColor: '#ffffff',
-        borderRadius: 18,
-        borderWidth: 1,
-        borderColor: '#eef1f7',
-        marginBottom: 14,
-        overflow: 'hidden',
-        shadowColor: '#0e1726',
-        shadowOpacity: 0.04,
-        shadowRadius: 8,
-        shadowOffset: { width: 0, height: 2 },
-        elevation: 1,
+        backgroundColor: '#ffffff', borderRadius: 18, borderWidth: 1,
+        borderColor: '#eef1f7', marginBottom: 14, overflow: 'hidden',
+        shadowColor: '#0e1726', shadowOpacity: 0.04, shadowRadius: 8,
+        shadowOffset: { width: 0, height: 2 }, elevation: 1,
     },
     jornadaCardHead: {
-        paddingHorizontal: 14,
-        paddingTop: 14,
-        paddingBottom: 10,
-        borderBottomWidth: 1,
-        borderBottomColor: '#f1f4f9',
+        paddingHorizontal: 14, paddingTop: 14, paddingBottom: 10,
+        borderBottomWidth: 1, borderBottomColor: '#f1f4f9',
     },
     clienteBadge: {
-        alignSelf: 'flex-start',
-        backgroundColor: '#0e1726',
-        borderRadius: 6,
-        paddingHorizontal: 8,
-        paddingVertical: 3,
-        marginBottom: 6,
+        alignSelf: 'flex-start', backgroundColor: '#0e1726',
+        borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3, marginBottom: 6,
     },
     clienteBadgeTx: {
-        fontSize: 10,
-        fontWeight: '800',
-        color: '#ffffff',
-        letterSpacing: 0.8,
+        fontSize: 10, fontWeight: '800', color: '#ffffff', letterSpacing: 0.8,
     },
-    jornadaSub: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#3a4656',
-    },
-    jornadaCardBody: {
-        paddingHorizontal: 14,
-        paddingVertical: 4,
-    },
-    jrnRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 10,
-        gap: 10,
-    },
-    jrnRowIcon: {
-        fontSize: 17,
-        width: 24,
-        textAlign: 'center',
-    },
+    jornadaSub: { fontSize: 13, fontWeight: '600', color: '#3a4656' },
+    jornadaCardBody: { paddingHorizontal: 14, paddingVertical: 4 },
+    jrnRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 10 },
+    jrnRowIcon: { fontSize: 17, width: 24, textAlign: 'center' },
     jrnRowLabel: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: '#737f90',
-        letterSpacing: 0.4,
-        textTransform: 'uppercase',
+        fontSize: 11, fontWeight: '700', color: '#737f90',
+        letterSpacing: 0.4, textTransform: 'uppercase',
     },
     jrnRowValue: {
-        fontSize: 15,
-        fontWeight: '700',
-        color: '#0e1726',
-        marginTop: 1,
-        fontVariant: ['tabular-nums'],
+        fontSize: 15, fontWeight: '700', color: '#0e1726',
+        marginTop: 1, fontVariant: ['tabular-nums'],
     },
-    jrnSep: {
-        height: 1,
-        backgroundColor: '#f1f4f9',
-    },
+    jrnSep: { height: 1, backgroundColor: '#f1f4f9' },
 
-    // ── PRE-INICIO: Hint "estás en línea" ──────────────────────────────
     hintBox: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-        padding: 12,
-        borderRadius: 12,
-        backgroundColor: '#e6f6ee',
-        marginBottom: 10,
+        flexDirection: 'row', alignItems: 'center', gap: 10,
+        padding: 12, borderRadius: 12, backgroundColor: '#e6f6ee', marginBottom: 10,
     },
-    hintDot: {
-        width: 8,
-        height: 8,
-        borderRadius: 4,
-        backgroundColor: '#0f9d63',
-    },
-    hintTx: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#065f46',
-        flex: 1,
-    },
+    hintDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#0f9d63' },
+    hintTx: { fontSize: 13, fontWeight: '600', color: '#065f46', flex: 1 },
 
-    // ── Banner amarillo (sugerencia_inicio_at) ─────────────────────────
     banner: {
-        backgroundColor: '#FEF3C7',
-        borderLeftWidth: 3,
-        borderLeftColor: '#F59E0B',
-        padding: 10,
-        borderRadius: 6,
-        marginBottom: 12,
+        backgroundColor: '#FEF3C7', borderLeftWidth: 3, borderLeftColor: '#F59E0B',
+        padding: 10, borderRadius: 6, marginBottom: 12,
     },
     bannerTx: { fontSize: 13, fontWeight: '700', color: '#92400E' },
 
-    // ── PASO 1.C — ACTIVA ─────────────────────────────────────────────
-    // Métrica principal (hero full-width)
+    // ── ACTIVA — hero + métricas + movimiento + timeline ─────────────
     hero: {
-        backgroundColor: '#ffffff',
-        borderRadius: 18,
-        borderWidth: 1,
-        borderColor: '#eef1f7',
-        paddingVertical: 18,
-        paddingHorizontal: 20,
-        marginBottom: 10,
-        alignItems: 'flex-start',
-        shadowColor: '#0e1726',
-        shadowOpacity: 0.04,
-        shadowRadius: 8,
-        shadowOffset: { width: 0, height: 2 },
-        elevation: 1,
+        backgroundColor: '#ffffff', borderRadius: 18, borderWidth: 1,
+        borderColor: '#eef1f7', paddingVertical: 18, paddingHorizontal: 20,
+        marginBottom: 10, alignItems: 'flex-start',
+        shadowColor: '#0e1726', shadowOpacity: 0.04, shadowRadius: 8,
+        shadowOffset: { width: 0, height: 2 }, elevation: 1,
     },
     heroLabel: {
-        fontSize: 11,
-        fontWeight: '700',
-        color: '#737f90',
-        letterSpacing: 0.6,
-        textTransform: 'uppercase',
-        marginBottom: 4,
+        fontSize: 11, fontWeight: '700', color: '#737f90',
+        letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 4,
     },
     heroValue: {
-        fontSize: 44,
-        fontWeight: '800',
-        color: '#0e1726',
-        letterSpacing: -1,
-        lineHeight: 48,
-        fontVariant: ['tabular-nums'],
+        fontSize: 44, fontWeight: '800', color: '#0e1726',
+        letterSpacing: -1, lineHeight: 48, fontVariant: ['tabular-nums'],
     },
     heroSub: {
-        fontSize: 13,
-        fontWeight: '600',
-        color: '#737f90',
-        marginTop: 4,
-        fontVariant: ['tabular-nums'],
+        fontSize: 13, fontWeight: '600', color: '#737f90',
+        marginTop: 4, fontVariant: ['tabular-nums'],
     },
-
-    // Fila de 3 métricas (Declaradas / Detectadas / Zona)
-    metricRow: {
-        flexDirection: 'row',
-        gap: 10,
-        marginBottom: 10,
-    },
+    metricRow: { flexDirection: 'row', gap: 10, marginBottom: 10 },
     metricCard: {
-        flex: 1,
-        backgroundColor: '#ffffff',
-        borderRadius: 15,
-        borderWidth: 1,
-        borderColor: '#eef1f7',
-        paddingVertical: 12,
-        paddingHorizontal: 12,
+        flex: 1, backgroundColor: '#ffffff', borderRadius: 15,
+        borderWidth: 1, borderColor: '#eef1f7',
+        paddingVertical: 12, paddingHorizontal: 12,
     },
     metricCardLabel: {
-        fontSize: 10,
-        fontWeight: '700',
-        color: '#737f90',
-        letterSpacing: 0.5,
-        textTransform: 'uppercase',
+        fontSize: 10, fontWeight: '700', color: '#737f90',
+        letterSpacing: 0.5, textTransform: 'uppercase',
     },
     metricCardValueBig: {
-        fontSize: 24,
-        fontWeight: '800',
-        color: '#0e1726',
-        marginTop: 4,
-        fontVariant: ['tabular-nums'],
+        fontSize: 24, fontWeight: '800', color: '#0e1726',
+        marginTop: 4, fontVariant: ['tabular-nums'],
     },
     metricCardValueSmall: {
-        fontSize: 14,
-        fontWeight: '700',
-        color: '#0e1726',
-        marginTop: 4,
+        fontSize: 14, fontWeight: '700', color: '#0e1726', marginTop: 4,
     },
-
-    // Línea de movimiento
     movementBox: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-        paddingVertical: 12,
-        paddingHorizontal: 14,
-        borderRadius: 12,
-        marginBottom: 14,
+        flexDirection: 'row', alignItems: 'center', gap: 10,
+        paddingVertical: 12, paddingHorizontal: 14,
+        borderRadius: 12, marginBottom: 14,
     },
-    movementDot: {
-        width: 10,
-        height: 10,
-        borderRadius: 5,
-    },
-    movementTx: {
-        fontSize: 14,
-        fontWeight: '700',
-        flex: 1,
-    },
-
-    // Timeline paradas detectadas
+    movementDot: { width: 10, height: 10, borderRadius: 5 },
+    movementTx: { fontSize: 14, fontWeight: '700', flex: 1 },
     sectionTitle: {
-        fontSize: 12,
-        fontWeight: '800',
-        color: '#737f90',
-        letterSpacing: 0.6,
-        textTransform: 'uppercase',
-        marginTop: 4,
-        marginBottom: 8,
+        fontSize: 12, fontWeight: '800', color: '#737f90',
+        letterSpacing: 0.6, textTransform: 'uppercase',
+        marginTop: 4, marginBottom: 8,
     },
     timelineEmpty: {
-        padding: 16,
-        borderRadius: 12,
-        backgroundColor: '#f6f8fb',
-        borderWidth: 1,
-        borderColor: '#eef1f7',
-        borderStyle: 'dashed' as any,
+        padding: 16, borderRadius: 12, backgroundColor: '#f6f8fb',
+        borderWidth: 1, borderColor: '#eef1f7', borderStyle: 'dashed' as any,
     },
     timelineEmptyTx: {
-        fontSize: 13,
-        color: '#737f90',
-        textAlign: 'center',
-        lineHeight: 18,
+        fontSize: 13, color: '#737f90', textAlign: 'center', lineHeight: 18,
     },
-    timeline: {
-        marginTop: 2,
-    },
-    timelineRow: {
-        flexDirection: 'row',
-        gap: 10,
-    },
-    timelineDotCol: {
-        width: 20,
-        alignItems: 'center',
-    },
+    timeline: { marginTop: 2 },
+    timelineRow: { flexDirection: 'row', gap: 10 },
+    timelineDotCol: { width: 20, alignItems: 'center' },
     timelineDot: {
-        width: 12,
-        height: 12,
-        borderRadius: 6,
-        marginTop: 4,
-        borderWidth: 2,
-        borderColor: '#ffffff',
+        width: 12, height: 12, borderRadius: 6, marginTop: 4,
+        borderWidth: 2, borderColor: '#ffffff',
     },
-    timelineDotDone: {
-        backgroundColor: '#0f9d63',
-    },
-    timelineDotActive: {
-        backgroundColor: '#2f54eb',
-    },
+    timelineDotDone: { backgroundColor: '#0f9d63' },
+    timelineDotActive: { backgroundColor: '#2f54eb' },
     timelineLine: {
-        flex: 1,
-        width: 2,
-        backgroundColor: '#eef1f7',
-        marginTop: 2,
-        marginBottom: 2,
+        flex: 1, width: 2, backgroundColor: '#eef1f7',
+        marginTop: 2, marginBottom: 2,
     },
-    timelineBody: {
-        flex: 1,
-        paddingBottom: 14,
-    },
-    timelineZona: {
-        fontSize: 14,
-        fontWeight: '700',
-        color: '#0e1726',
-    },
+    timelineBody: { flex: 1, paddingBottom: 14 },
+    timelineZona: { fontSize: 14, fontWeight: '700', color: '#0e1726' },
     timelineMeta: {
-        fontSize: 12,
-        fontWeight: '600',
-        color: '#737f90',
-        marginTop: 2,
-        fontVariant: ['tabular-nums'],
+        fontSize: 12, fontWeight: '600', color: '#737f90',
+        marginTop: 2, fontVariant: ['tabular-nums'],
     },
 
-    // ── Footer anclado (CTA) ───────────────────────────────────────────
+    // ── PASO 1.D — RESUMEN ──────────────────────────────────────────
+    successBlock: {
+        alignItems: 'center', paddingTop: 8, paddingBottom: 16,
+    },
+    checkCircle: {
+        width: 64, height: 64, borderRadius: 32,
+        backgroundColor: '#e6f6ee',
+        alignItems: 'center', justifyContent: 'center',
+        marginBottom: 10,
+        borderWidth: 2, borderColor: '#0f9d63',
+    },
+    checkCircleTx: {
+        fontSize: 32, fontWeight: '800', color: '#0f9d63',
+        lineHeight: 36,
+    },
+    successTitle: {
+        fontSize: 20, fontWeight: '800', color: '#0e1726',
+        letterSpacing: -0.3,
+    },
+    successSub: {
+        fontSize: 14, fontWeight: '600', color: '#3a4656',
+        marginTop: 6, textAlign: 'center',
+    },
+    successFecha: {
+        fontSize: 12, fontWeight: '600', color: '#737f90',
+        marginTop: 2, textTransform: 'capitalize',
+    },
+    resumenGrid: {
+        flexDirection: 'row', flexWrap: 'wrap', gap: 10,
+        marginTop: 4,
+    },
+    resumenTile: {
+        flexBasis: '48%', flexGrow: 1,
+        backgroundColor: '#ffffff', borderRadius: 15,
+        borderWidth: 1, borderColor: '#eef1f7',
+        paddingVertical: 14, paddingHorizontal: 14,
+    },
+    resumenLabel: {
+        fontSize: 10, fontWeight: '700', color: '#737f90',
+        letterSpacing: 0.5, textTransform: 'uppercase',
+    },
+    resumenValue: {
+        fontSize: 22, fontWeight: '800', color: '#0e1726',
+        marginTop: 4, fontVariant: ['tabular-nums'],
+    },
+    resumenHint: {
+        fontSize: 12, fontWeight: '600', color: '#737f90',
+        textAlign: 'center', marginTop: 14,
+    },
+
+    // ── Footer anclado (CTA) ────────────────────────────────────────
     footer: {
-        paddingHorizontal: 16,
-        paddingTop: 10,
-        backgroundColor: '#fff',
+        paddingHorizontal: 16, paddingTop: 10, backgroundColor: '#fff',
     },
     btn: {
-        paddingVertical: 16,
-        borderRadius: 16,
-        alignItems: 'center',
-        shadowColor: '#0e1726',
-        shadowOpacity: 0.08,
-        shadowRadius: 8,
-        shadowOffset: { width: 0, height: 2 },
-        elevation: 2,
+        paddingVertical: 16, borderRadius: 16, alignItems: 'center',
+        shadowColor: '#0e1726', shadowOpacity: 0.08, shadowRadius: 8,
+        shadowOffset: { width: 0, height: 2 }, elevation: 2,
     },
-    btnPrimary: { backgroundColor: '#0f9d63' },
-    btnDanger: { backgroundColor: '#e04646' }, // PASO 1.C — token stop
+    btnPrimary: { backgroundColor: '#0f9d63' },   // iniciar
+    btnDanger:  { backgroundColor: '#e04646' },   // finalizar
+    btnBrand:   { backgroundColor: '#2f54eb' },   // listo (resumen)
     btnDisabled: { opacity: 0.6 },
     btnTx: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
 
-    // ── Modal paradas ──────────────────────────────────────────────────
+    // ── Modal paradas ──────────────────────────────────────────────
     modalBg: {
-        flex: 1,
-        backgroundColor: 'rgba(15,23,42,0.55)',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 24,
+        flex: 1, backgroundColor: 'rgba(15,23,42,0.55)',
+        alignItems: 'center', justifyContent: 'center', padding: 24,
     },
     modalCard: {
-        width: '100%',
-        maxWidth: 360,
-        backgroundColor: '#fff',
-        borderRadius: 14,
-        padding: 20,
+        width: '100%', maxWidth: 360, backgroundColor: '#fff',
+        borderRadius: 14, padding: 20,
     },
     modalTitle: { fontSize: 16, fontWeight: '800', color: '#0B1F3A' },
     modalHint: { fontSize: 12, color: '#6B7280', marginTop: 4, marginBottom: 12 },
     modalInput: {
-        borderWidth: 1,
-        borderColor: '#E5E7EB',
-        borderRadius: 8,
-        padding: 12,
-        fontSize: 16,
-        marginBottom: 16,
+        borderWidth: 1, borderColor: '#E5E7EB', borderRadius: 8,
+        padding: 12, fontSize: 16, marginBottom: 16,
     },
     modalBtnRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
     modalBtn: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 },
