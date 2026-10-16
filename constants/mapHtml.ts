@@ -126,13 +126,13 @@ export const MAP_HTML = `<!DOCTYPE html>
                 doubleClickZoom: true,
             }).setView([DEFAULT_LAT, DEFAULT_LNG], DEFAULT_ZOOM);
 
-            // Esri World Light Gray Base — gris limpio tipo Positron, sin API key.
-            // CARTO fue reemplazado tras confirmar que su endpoint anónimo devuelve
-            // watermark "API KEY REQUIRED". Esri sirve z0-16 nativamente; Leaflet
-            // sobre-escala hasta z19 para nivel calle. Orden path: {z}/{y}/{x}.
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri',
-                maxNativeZoom: 16,
+            // OpenStreetMap estándar — vuelta al basemap original tras verificar que
+            // Esri Light Gray no muestra nombres de calles (base sin labels) y
+            // CARTO ahora exige API key. OSM sirve mapa detallado con rotulado
+            // completo, gratis y sin key.
+            // Orden path OSM: {z}/{x}/{y} (NO {z}/{y}/{x} como Esri).
+            L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors',
                 maxZoom: 19,
             }).addTo(map);
 
