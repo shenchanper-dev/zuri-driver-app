@@ -1,20 +1,36 @@
 /**
- * JornadaEspecialView — Vista ESPECIAL para el conductor.
+ * JornadaEspecialView — Vista ESPECIAL para el conductor (APK 111 · PASO 1.A).
  *
- * NO muestra timeline de paradas (eso es NEMT). Muestra:
- *  - Estado 1 (PUBLICADA): "Tienes una jornada hoy" + boton INICIAR + modal paradas declaradas.
- *  - Estado 2 (ACTIVA): cronometro desde inicio_real_at + contador declaradas/detectadas +
- *    indicador de color progresivo (gris / amarillo / verde) segun minutos detenido local,
- *    + boton FINALIZAR.
+ * Estructura (patron Uber Driver):
+ *   - Self-contained BottomSheet @gorhom con snap points 16% / 46% / 86%.
+ *   - BottomSheetScrollView: contenido scrolleable (header + banners + cards).
+ *   - BottomSheetFooter: CTA full-width ANCLADO al borde inferior del sheet
+ *     respetando safe-area insets. Resuelve el bug previo del boton a media
+ *     pantalla (antes era un <View> normal dentro del scroll).
+ *   - Modal "Cuantas paradas hoy?" (existente, no cambia la logica).
  *
- * El color progresivo se calcula LOCALMENTE con el GPS del store. Es visual/estimado.
+ * Estados:
+ *   - PUBLICADA: header + banner opcional + CTA "INICIAR JORNADA" (abre modal).
+ *   - ACTIVA:    header + cronometro + declaradas/detectadas + color parada
+ *                + banner opcional (hora_fin+60min) + CTA "FINALIZAR JORNADA".
+ *
+ * El color de parada se calcula LOCALMENTE con el GPS del store (visual).
  * El backend (paradaDetector) tiene la verdad y actualiza paradas_detectadas.
+ *
+ * NEMT no se toca: ese flujo sigue en JornadaActivaView con el BottomSheet
+ * clasico del index.tsx.
  */
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     View, Text, StyleSheet, TouchableOpacity, Modal, TextInput,
-    ActivityIndicator, Alert, ScrollView,
+    ActivityIndicator, Alert,
 } from 'react-native';
+import BottomSheet, {
+    BottomSheetFooter,
+    BottomSheetScrollView,
+    type BottomSheetFooterProps,
+} from '@gorhom/bottom-sheet';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Servicio } from '@/types/servicios';
 import { driverApi } from '@/services/api';
 import { useLocationStore } from '@/stores/location';
@@ -49,7 +65,6 @@ function fmtHora(iso: string | null | undefined): string {
     return d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
-// Jornada con los campos de FASE E (vive dentro de servicio.jornada que extendimos)
 interface JornadaFaseE {
     id: number;
     estado: 'PUBLICADA' | 'ACTIVA' | string;
@@ -67,6 +82,7 @@ interface JornadaFaseE {
 }
 
 export function JornadaEspecialView({ servicios, onRefresh }: Props) {
+    const insets = useSafeAreaInsets();
     const jornada = (servicios[0]?.jornada as unknown) as JornadaFaseE | undefined;
     const jornadaId = jornada?.id;
 
@@ -74,6 +90,9 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
     const [paradasInput, setParadasInput] = useState('');
     const [loading, setLoading] = useState(false);
     const [now, setNow] = useState(Date.now());
+
+    const bsRef = useRef<BottomSheet>(null);
+    const snapPoints = useMemo(() => ['16%', '46%', '86%'], []);
 
     // Cronometro: tick 1s solo cuando ACTIVA
     useEffect(() => {
@@ -83,8 +102,6 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
     }, [jornada?.estado]);
 
     // ── Color progresivo (local) ────────────────────────────────────
-    // Guardamos el "ancla" (ultima posicion donde empezo a estar quieto).
-    // Si la ubicacion actual se mueve > 50m del ancla, se resetea el ancla.
     const currentLocation = useLocationStore(s => s.currentLocation);
     const [ancla, setAncla] = useState<{ lat: number; lng: number; since: number } | null>(null);
 
@@ -114,12 +131,12 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
         return { bg: '#D1FAE5', fg: '#065F46', label: `Con un paciente · ${minutosDetenido}m` };
     }, [jornada?.estado, minutosDetenido, gpsDisponible]);
 
-    const handleIniciar = () => {
+    const handleIniciar = useCallback(() => {
         setParadasInput('');
         setModalOpen(true);
-    };
+    }, []);
 
-    const submitIniciar = async (paradas?: number) => {
+    const submitIniciar = useCallback(async (paradas?: number) => {
         if (!jornadaId) return;
         setModalOpen(false);
         setLoading(true);
@@ -131,9 +148,9 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
         } finally {
             setLoading(false);
         }
-    };
+    }, [jornadaId, onRefresh]);
 
-    const handleFinalizar = () => {
+    const handleFinalizar = useCallback(() => {
         if (!jornadaId) return;
         Alert.alert(
             'Finalizar jornada',
@@ -177,92 +194,36 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                 },
             ],
         );
-    };
+    }, [jornadaId, jornada?.paradas_detectadas, onRefresh]);
 
+    // ── Empty state (sin jornada) — igual conserva el sheet ───────────────
     if (!jornada) {
         return (
-            <View style={s.empty}><Text style={s.emptyTx}>Sin jornada activa</Text></View>
+            <BottomSheet
+                ref={bsRef}
+                snapPoints={snapPoints}
+                index={1}
+                enablePanDownToClose={false}
+                enableOverDrag={false}
+                handleIndicatorStyle={{ backgroundColor: '#CBD5E1', width: 48, height: 5 }}
+                backgroundStyle={{ backgroundColor: '#FFFFFF' }}
+            >
+                <BottomSheetScrollView contentContainerStyle={s.emptyScroll}>
+                    <Text style={s.emptyTx}>Sin jornada activa</Text>
+                </BottomSheetScrollView>
+            </BottomSheet>
         );
     }
 
     const esActiva = jornada.estado === 'ACTIVA';
     const esPublicada = jornada.estado === 'PUBLICADA';
-
     const inicioMs = jornada.inicio_real_at ? new Date(jornada.inicio_real_at).getTime() : null;
     const duracionTx = inicioMs ? fmtDur(now - inicioMs) : '—';
 
-    return (
-        <View style={s.root}>
-            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
-                {/* Header */}
-                <View style={s.header}>
-                    <Text style={s.headerLabel}>
-                        {esActiva ? 'JORNADA ACTIVA' : 'TU JORNADA HOY'}
-                    </Text>
-                    <Text style={s.doctor} numberOfLines={1}>
-                        Dr. {jornada.doctor_nombre || '—'}
-                    </Text>
-                    <Text style={s.cliente} numberOfLines={1}>
-                        {jornada.cliente_nombre || 'Sin cliente'}
-                        {jornada.turno ? ` · Turno ${jornada.turno}` : ''}
-                    </Text>
-                </View>
-
-                {/* Banner sugerencia_inicio (PUBLICADA + GPS se movio) */}
-                {esPublicada && jornada.sugerencia_inicio_at && (
-                    <View style={s.banner}>
-                        <Text style={s.bannerTx}>¿Ya iniciaste tu jornada?</Text>
-                    </View>
-                )}
-
-                {/* T1.6: Banner recordatorio FIN (ACTIVA + hora_fin + 60 min pasado) */}
-                {esActiva && jornada.hora_fin_planeada && (() => {
-                    const [hh, mm] = jornada.hora_fin_planeada.split(':').map(Number);
-                    const finPlan = new Date();
-                    finPlan.setHours(hh, mm, 0, 0);
-                    const vencido = Date.now() - finPlan.getTime() > 60 * 60 * 1000;
-                    if (!vencido) return null;
-                    return (
-                        <View style={[s.banner, { backgroundColor: '#FEE2E2', borderLeftColor: '#DC2626' }]}>
-                            <Text style={[s.bannerTx, { color: '#991B1B' }]}>¿Terminaste tu jornada? Supero la hora planeada en +60 min.</Text>
-                        </View>
-                    );
-                })()}
-
-                {/* Estado ACTIVA: cronometro + contadores + color parada */}
-                {esActiva && (
-                    <>
-                        <View style={s.card}>
-                            <Text style={s.cardLabel}>Inicio</Text>
-                            <Text style={s.cardVal}>
-                                {fmtHora(jornada.inicio_real_at)} · {duracionTx} en curso
-                            </Text>
-                        </View>
-
-                        <View style={s.row}>
-                            <View style={[s.card, s.rowCard]}>
-                                <Text style={s.cardLabel}>Declaradas</Text>
-                                <Text style={s.cardBig}>{jornada.paradas_declaradas ?? '—'}</Text>
-                            </View>
-                            <View style={[s.card, s.rowCard]}>
-                                <Text style={s.cardLabel}>Detectadas</Text>
-                                <Text style={s.cardBig}>{jornada.paradas_detectadas ?? 0}</Text>
-                            </View>
-                        </View>
-
-                        {colorParada && (
-                            <View style={[s.estadoParada, { backgroundColor: colorParada.bg }]}>
-                                <Text style={[s.estadoParadaTx, { color: colorParada.fg }]}>
-                                    {colorParada.label}
-                                </Text>
-                            </View>
-                        )}
-                    </>
-                )}
-            </ScrollView>
-
-            {/* Boton grande fijo abajo */}
-            <View style={s.footer}>
+    // ── CTA anclado al borde inferior del sheet ──────────────────────────
+    const renderFooter = useCallback((props: BottomSheetFooterProps) => (
+        <BottomSheetFooter {...props} bottomInset={insets.bottom}>
+            <View style={[s.footer, { paddingBottom: 14 }]}>
                 {esPublicada ? (
                     <TouchableOpacity
                         style={[s.btn, s.btnPrimary, loading && s.btnDisabled]}
@@ -281,6 +242,89 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                     </TouchableOpacity>
                 ) : null}
             </View>
+        </BottomSheetFooter>
+    ), [insets.bottom, esPublicada, esActiva, loading, handleIniciar, handleFinalizar]);
+
+    return (
+        <>
+            <BottomSheet
+                ref={bsRef}
+                snapPoints={snapPoints}
+                index={1}
+                enablePanDownToClose={false}
+                enableOverDrag={false}
+                handleIndicatorStyle={{ backgroundColor: '#CBD5E1', width: 48, height: 5 }}
+                backgroundStyle={{ backgroundColor: '#FFFFFF' }}
+                footerComponent={renderFooter}
+            >
+                <BottomSheetScrollView contentContainerStyle={s.scrollContent}>
+                    {/* Header */}
+                    <View style={s.header}>
+                        <Text style={s.headerLabel}>
+                            {esActiva ? 'JORNADA ACTIVA' : 'TU JORNADA HOY'}
+                        </Text>
+                        <Text style={s.doctor} numberOfLines={1}>
+                            Dr. {jornada.doctor_nombre || '—'}
+                        </Text>
+                        <Text style={s.cliente} numberOfLines={1}>
+                            {jornada.cliente_nombre || 'Sin cliente'}
+                            {jornada.turno ? ` · Turno ${jornada.turno}` : ''}
+                        </Text>
+                    </View>
+
+                    {/* Banner sugerencia_inicio (PUBLICADA + GPS se movio) */}
+                    {esPublicada && jornada.sugerencia_inicio_at && (
+                        <View style={s.banner}>
+                            <Text style={s.bannerTx}>¿Ya iniciaste tu jornada?</Text>
+                        </View>
+                    )}
+
+                    {/* T1.6: Banner recordatorio FIN (ACTIVA + hora_fin + 60 min pasado) */}
+                    {esActiva && jornada.hora_fin_planeada && (() => {
+                        const [hh, mm] = jornada.hora_fin_planeada.split(':').map(Number);
+                        const finPlan = new Date();
+                        finPlan.setHours(hh, mm, 0, 0);
+                        const vencido = Date.now() - finPlan.getTime() > 60 * 60 * 1000;
+                        if (!vencido) return null;
+                        return (
+                            <View style={[s.banner, { backgroundColor: '#FEE2E2', borderLeftColor: '#DC2626' }]}>
+                                <Text style={[s.bannerTx, { color: '#991B1B' }]}>¿Terminaste tu jornada? Supero la hora planeada en +60 min.</Text>
+                            </View>
+                        );
+                    })()}
+
+                    {/* Estado ACTIVA: cronometro + contadores + color parada */}
+                    {esActiva && (
+                        <>
+                            <View style={s.card}>
+                                <Text style={s.cardLabel}>Inicio</Text>
+                                <Text style={s.cardVal}>
+                                    {fmtHora(jornada.inicio_real_at)} · {duracionTx} en curso
+                                </Text>
+                            </View>
+
+                            <View style={s.row}>
+                                <View style={[s.card, s.rowCard]}>
+                                    <Text style={s.cardLabel}>Declaradas</Text>
+                                    <Text style={s.cardBig}>{jornada.paradas_declaradas ?? '—'}</Text>
+                                </View>
+                                <View style={[s.card, s.rowCard]}>
+                                    <Text style={s.cardLabel}>Detectadas</Text>
+                                    <Text style={s.cardBig}>{jornada.paradas_detectadas ?? 0}</Text>
+                                </View>
+                            </View>
+
+                            {colorParada && (
+                                <View style={[s.estadoParada, { backgroundColor: colorParada.bg }]}>
+                                    <Text style={[s.estadoParadaTx, { color: colorParada.fg }]}>
+                                        {colorParada.label}
+                                    </Text>
+                                </View>
+                            )}
+                        </>
+                    )}
+                </BottomSheetScrollView>
+            </BottomSheet>
 
             {/* Modal: cuantas paradas */}
             <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
@@ -313,13 +357,21 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                     </View>
                 </View>
             </Modal>
-        </View>
+        </>
     );
 }
 
 const s = StyleSheet.create({
-    root: { flex: 1, backgroundColor: '#F0F4F8' },
-    empty: { padding: 24, alignItems: 'center' },
+    scrollContent: {
+        padding: 16,
+        // El footer anclado ocupa ~84px (btn 56 + padding 16+14 + safe-area).
+        // Reservamos ese espacio al final para que el scroll no quede bajo el CTA.
+        paddingBottom: 120,
+    },
+    emptyScroll: {
+        padding: 24,
+        alignItems: 'center',
+    },
     emptyTx: { color: '#6B7280', fontSize: 14 },
 
     header: { marginBottom: 12 },
@@ -369,10 +421,11 @@ const s = StyleSheet.create({
     },
     estadoParadaTx: { fontSize: 14, fontWeight: '800', letterSpacing: 0.3 },
 
+    // Footer anclado — vive dentro de BottomSheetFooter, sin borde superior
+    // propio (lo da la sombra del sheet). padding horizontal 16, vertical 12.
     footer: {
-        padding: 12,
-        borderTopWidth: 1,
-        borderTopColor: '#E5E7EB',
+        paddingHorizontal: 16,
+        paddingTop: 10,
         backgroundColor: '#fff',
     },
     btn: {

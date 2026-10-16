@@ -279,28 +279,30 @@ export default function HomeScreen() {
 
             {/* BOTTOM: BottomSheet arrastrable con 3 snap points (patron Uber/Onfleet) */}
             {jornadaActiva ? (
-                <BottomSheet
-                    ref={bsRef}
-                    snapPoints={snapPoints}
-                    index={1}
-                    enablePanDownToClose={false}
-                    handleIndicatorStyle={{ backgroundColor: '#CBD5E1', width: 48, height: 5 }}
-                    backgroundStyle={{ backgroundColor: '#FFFFFF' }}
-                >
-                    <BottomSheetView style={{ flex: 1 }}>
-                        {jornadaActiva[0]?.jornada?.modo === 'NEMT' ? (
+                jornadaActiva[0]?.jornada?.modo === 'NEMT' ? (
+                    <BottomSheet
+                        ref={bsRef}
+                        snapPoints={snapPoints}
+                        index={1}
+                        enablePanDownToClose={false}
+                        handleIndicatorStyle={{ backgroundColor: '#CBD5E1', width: 48, height: 5 }}
+                        backgroundStyle={{ backgroundColor: '#FFFFFF' }}
+                    >
+                        <BottomSheetView style={{ flex: 1 }}>
                             <JornadaActivaView
                                 servicios={jornadaActiva}
                                 onRefresh={refrescarResumen}
                             />
-                        ) : (
-                            <JornadaEspecialView
-                                servicios={jornadaActiva}
-                                onRefresh={refrescarResumen}
-                            />
-                        )}
-                    </BottomSheetView>
-                </BottomSheet>
+                        </BottomSheetView>
+                    </BottomSheet>
+                ) : (
+                    // APK 111 · PASO 1.A — ESPECIAL monta su propio BottomSheet
+                    // con footerComponent (CTA anclado al borde inferior).
+                    <JornadaEspecialView
+                        servicios={jornadaActiva}
+                        onRefresh={refrescarResumen}
+                    />
+                )
             ) : (
                 <HomeBottomSheet
                     isConnected={isOnline}
