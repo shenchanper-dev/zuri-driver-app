@@ -3,18 +3,15 @@
  *
  * APK 111:
  *  · PASO 1.A: BottomSheet self-contained + CTA anclado (BottomSheetFooter).
- *  · PASO 1.B: estado PRE-INICIO con jerarquia densa (eyebrow + chip ZURI
- *               ESPECIAL + tarjeta de jornada + hint + banner sugerencia).
+ *  · PASO 1.B: estado PRE-INICIO con jerarquia densa (eyebrow + chip +
+ *               tarjeta + hint + banner sugerencia).
+ *  · PASO 1.C: estado ACTIVA — header + métrica principal con cronómetro,
+ *               fila Declaradas/Detectadas/Zona, línea de movimiento,
+ *               timeline de paradas detectadas, CTA rojo "Finalizar jornada".
+ *  · PASO 1.D: estado RESUMEN (post-finalizar) con grid de métricas y CTA
+ *               "Listo" que vuelve a reset.
  *
- * Datos consumidos (del backend, en servicios[0].jornada):
- *   turno, cliente_nombre, doctor_nombre,
- *   hora_inicio_planeada, hora_fin_planeada,
- *   paradas_declaradas, paradas_detectadas,
- *   inicio_real_at, fin_real_at, sugerencia_inicio_at,
- *   distrito (opcional — ver nota al final del archivo).
- *
- * NEMT no se toca: ese flujo sigue en JornadaActivaView con el BottomSheet
- * clasico del index.tsx.
+ * NEMT no se toca: ese flujo sigue en JornadaActivaView.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -61,6 +58,20 @@ function fmtHora(iso: string | null | undefined): string {
     return d.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', hour12: false });
 }
 
+// ── Paradas detectadas (opcional en payload — ver nota al final) ─────────
+interface ParadaDetectada {
+    id: number;
+    lat?: number;
+    lng?: number;
+    inicio_at: string | null;
+    confirmada_at?: string | null;
+    cerrada_at?: string | null;
+    duracion_min?: number | null;
+    estado?: string | null;
+    direccion_aprox?: string | null;
+    distrito_aprox?: string | null;
+}
+
 interface JornadaFaseE {
     id: number;
     estado: 'PUBLICADA' | 'ACTIVA' | string;
@@ -75,8 +86,10 @@ interface JornadaFaseE {
     paradas_declaradas?: number | null;
     paradas_detectadas?: number;
     sugerencia_inicio_at?: string | null;
-    // PASO 1.B — campo opcional (ver nota al final del archivo).
+    // PASO 1.B — campo opcional distrito.
     distrito?: string | null;
+    // PASO 1.C — timeline opcional desde backend.
+    paradas_detectadas_list?: ParadaDetectada[];
 }
 
 // ── Row helper para la tarjeta de jornada (PASO 1.B) ────────────────────
@@ -88,6 +101,18 @@ function JornadaRow({ icon, label, value }: { icon: string; label: string; value
                 <Text style={s.jrnRowLabel}>{label}</Text>
                 <Text style={s.jrnRowValue} numberOfLines={1}>{value}</Text>
             </View>
+        </View>
+    );
+}
+
+// ── Tile métrica (PASO 1.C) ─────────────────────────────────────────────
+function MetricTile({ label, value, big = true }: { label: string; value: string; big?: boolean }) {
+    return (
+        <View style={s.metricCard}>
+            <Text style={s.metricCardLabel}>{label}</Text>
+            <Text style={big ? s.metricCardValueBig : s.metricCardValueSmall} numberOfLines={1}>
+                {value}
+            </Text>
         </View>
     );
 }
@@ -105,7 +130,7 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
     const bsRef = useRef<BottomSheet>(null);
     const snapPoints = useMemo(() => ['16%', '46%', '86%'], []);
 
-    // Cronometro: tick 1s solo cuando ACTIVA
+    // Cronometro: tick 1s solo cuando ACTIVA — reutilizado por métrica hero
     useEffect(() => {
         if (jornada?.estado !== 'ACTIVA') return;
         const iv = setInterval(() => setNow(Date.now()), 1000);
@@ -133,14 +158,29 @@ export function JornadaEspecialView({ servicios, onRefresh }: Props) {
     const minutosDetenido = ancla ? Math.floor((now - ancla.since) / 60000) : 0;
     const gpsDisponible = !!currentLocation;
 
-    const colorParada = useMemo(() => {
+    // Línea de movimiento (PASO 1.C) — simplificado al vocabulario del mockup.
+    const movimiento = useMemo(() => {
         if (jornada?.estado !== 'ACTIVA') return null;
-        if (!gpsDisponible) return { bg: '#F3F4F6', fg: '#9CA3AF', label: 'Sin señal GPS' };
-        if (minutosDetenido < 1) return { bg: '#F3F4F6', fg: '#6B7280', label: 'En movimiento' };
-        if (minutosDetenido < 10) return { bg: '#F3F4F6', fg: '#6B7280', label: `Detenido ${minutosDetenido}m` };
-        if (minutosDetenido < 15) return { bg: '#FEF3C7', fg: '#92400E', label: `Parada posible · ${minutosDetenido}m` };
-        return { bg: '#D1FAE5', fg: '#065F46', label: `Con un paciente · ${minutosDetenido}m` };
-    }, [jornada?.estado, minutosDetenido, gpsDisponible]);
+        if (!gpsDisponible) {
+            return { bg: '#F3F4F6', fg: '#737f90', dot: '#9CA3AF', label: 'Sin señal GPS' };
+        }
+        if (minutosDetenido < 1) {
+            return { bg: '#e6f6ee', fg: '#0b7d4e', dot: '#0f9d63', label: 'En movimiento' };
+        }
+        // Detenido en zona (zona = distrito si lo tenemos)
+        const zona = jornada?.distrito ? ` en ${jornada.distrito}` : '';
+        if (minutosDetenido < 15) {
+            return {
+                bg: '#fdf2dd', fg: '#8a5a0b', dot: '#e8920a',
+                label: `Detenido ${minutosDetenido}m${zona}`,
+            };
+        }
+        // Visita larga (>=15 min) — operativamente útil, lo marcamos verde.
+        return {
+            bg: '#e6f6ee', fg: '#0b7d4e', dot: '#0f9d63',
+            label: `Con un paciente · ${minutosDetenido}m${zona}`,
+        };
+    }, [jornada?.estado, minutosDetenido, gpsDisponible, jornada?.distrito]);
 
     const handleIniciar = useCallback(() => {
         setParadasInput('');
@@ -207,7 +247,7 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
         );
     }, [jornadaId, jornada?.paradas_detectadas, onRefresh]);
 
-    // ── Empty state (sin jornada) — igual conserva el sheet ───────────────
+    // ── Empty state (sin jornada) ──────────────────────────────────
     if (!jornada) {
         return (
             <BottomSheet
@@ -231,7 +271,7 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
     const inicioMs = jornada.inicio_real_at ? new Date(jornada.inicio_real_at).getTime() : null;
     const duracionTx = inicioMs ? fmtDur(now - inicioMs) : '—';
 
-    // PASO 1.B — valores derivados del estado PRE-INICIO
+    // ── PASO 1.B — valores PRE-INICIO
     const clienteBadge = (jornada.cliente_nombre || 'JORNADA').toUpperCase();
     const horarioTx =
         jornada.hora_inicio_planeada && jornada.hora_fin_planeada
@@ -243,6 +283,11 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
     const paradasTx = jornada.paradas_declaradas != null
         ? String(jornada.paradas_declaradas)
         : '—';
+
+    // ── PASO 1.C — timeline paradas detectadas
+    const paradasList: ParadaDetectada[] = Array.isArray(jornada.paradas_detectadas_list)
+        ? jornada.paradas_detectadas_list
+        : [];
 
     // ── CTA anclado al borde inferior del sheet ──────────────────────────
     const renderFooter = useCallback((props: BottomSheetFooterProps) => (
@@ -331,28 +376,65 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                                 </Text>
                             </View>
 
-                            {/* Banner sugerencia_inicio_at (GPS detectó movimiento) */}
+                            {/* Banner sugerencia_inicio_at */}
                             {jornada.sugerencia_inicio_at && (
                                 <View style={s.banner}>
                                     <Text style={s.bannerTx}>¿Ya iniciaste tu jornada?</Text>
                                 </View>
                             )}
                         </>
-                    ) : (
-                        // ─── Estado ACTIVA — se rediseña en PASO 1.C ─────────
+                    ) : esActiva ? (
+                        // ─── PASO 1.C · ESTADO ACTIVO ────────────────────────
                         <>
-                            <View style={s.header}>
-                                <Text style={s.headerLabel}>JORNADA ACTIVA</Text>
-                                <Text style={s.doctor} numberOfLines={1}>
-                                    Dr. {jornada.doctor_nombre || '—'}
-                                </Text>
-                                <Text style={s.cliente} numberOfLines={1}>
-                                    {jornada.cliente_nombre || 'Sin cliente'}
-                                    {jornada.turno ? ` · Turno ${jornada.turno}` : ''}
+                            {/* Header jornada */}
+                            <View style={s.eyebrowRow}>
+                                <Text style={[s.eyebrow, { color: '#0f9d63' }]}>JORNADA ACTIVA</Text>
+                                <View style={s.chipZuri}>
+                                    <Text style={s.chipZuriTx}>ZURI ESPECIAL</Text>
+                                </View>
+                            </View>
+                            <Text style={s.turnoTitle} numberOfLines={1}>
+                                {jornada.cliente_nombre || 'Sin cliente'}
+                                {jornada.turno ? ` · Turno ${jornada.turno}` : ''}
+                            </Text>
+
+                            {/* Métrica principal: cronómetro vivo (full-width) */}
+                            <View style={s.hero}>
+                                <Text style={s.heroLabel}>En curso</Text>
+                                <Text style={s.heroValue}>{duracionTx}</Text>
+                                <Text style={s.heroSub}>
+                                    Inicio {fmtHora(jornada.inicio_real_at)}
                                 </Text>
                             </View>
 
-                            {/* T1.6: Banner recordatorio FIN (ACTIVA + hora_fin + 60 min pasado) */}
+                            {/* Fila declaradas / detectadas / zona */}
+                            <View style={s.metricRow}>
+                                <MetricTile
+                                    label="Declaradas"
+                                    value={jornada.paradas_declaradas != null ? String(jornada.paradas_declaradas) : '—'}
+                                />
+                                <MetricTile
+                                    label="Detectadas"
+                                    value={String(jornada.paradas_detectadas ?? 0)}
+                                />
+                                <MetricTile
+                                    label="Zona"
+                                    value={jornada.distrito ?? '—'}
+                                    big={false}
+                                />
+                            </View>
+
+                            {/* Línea de movimiento */}
+                            {movimiento && (
+                                <View style={[s.movementBox, { backgroundColor: movimiento.bg }]}>
+                                    <View style={[s.movementDot, { backgroundColor: movimiento.dot }]} />
+                                    <Text style={[s.movementTx, { color: movimiento.fg }]} numberOfLines={1}>
+                                        {movimiento.label}
+                                    </Text>
+                                </View>
+                            )}
+
+                            {/* Banner T1.6: recordatorio FIN (hora_fin + 60 min pasado) */}
                             {jornada.hora_fin_planeada && (() => {
                                 const [hh, mm] = jornada.hora_fin_planeada.split(':').map(Number);
                                 const finPlan = new Date();
@@ -366,39 +448,48 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
                                 );
                             })()}
 
-                            {/* Cronometro + contadores + color parada */}
-                            <View style={s.card}>
-                                <Text style={s.cardLabel}>Inicio</Text>
-                                <Text style={s.cardVal}>
-                                    {fmtHora(jornada.inicio_real_at)} · {duracionTx} en curso
-                                </Text>
-                            </View>
-
-                            <View style={s.row}>
-                                <View style={[s.card, s.rowCard]}>
-                                    <Text style={s.cardLabel}>Declaradas</Text>
-                                    <Text style={s.cardBig}>{jornada.paradas_declaradas ?? '—'}</Text>
-                                </View>
-                                <View style={[s.card, s.rowCard]}>
-                                    <Text style={s.cardLabel}>Detectadas</Text>
-                                    <Text style={s.cardBig}>{jornada.paradas_detectadas ?? 0}</Text>
-                                </View>
-                            </View>
-
-                            {colorParada && (
-                                <View style={[s.estadoParada, { backgroundColor: colorParada.bg }]}>
-                                    <Text style={[s.estadoParadaTx, { color: colorParada.fg }]}>
-                                        {colorParada.label}
+                            {/* Timeline paradas detectadas */}
+                            <Text style={s.sectionTitle}>Paradas detectadas</Text>
+                            {paradasList.length === 0 ? (
+                                <View style={s.timelineEmpty}>
+                                    <Text style={s.timelineEmptyTx}>
+                                        Las paradas aparecerán aquí cuando el GPS las detecte.
                                     </Text>
+                                </View>
+                            ) : (
+                                <View style={s.timeline}>
+                                    {paradasList.map((p, i) => {
+                                        const esUltimo = i === paradasList.length - 1;
+                                        const cerrada = !!p.cerrada_at;
+                                        const zonaP = p.distrito_aprox || p.direccion_aprox || 'Parada';
+                                        const dur = p.duracion_min != null ? `${p.duracion_min}m` : '—';
+                                        return (
+                                            <View key={p.id} style={s.timelineRow}>
+                                                <View style={s.timelineDotCol}>
+                                                    <View style={[
+                                                        s.timelineDot,
+                                                        cerrada ? s.timelineDotDone : s.timelineDotActive,
+                                                    ]} />
+                                                    {!esUltimo && <View style={s.timelineLine} />}
+                                                </View>
+                                                <View style={s.timelineBody}>
+                                                    <Text style={s.timelineZona} numberOfLines={1}>{zonaP}</Text>
+                                                    <Text style={s.timelineMeta}>
+                                                        {fmtHora(p.inicio_at)} · {dur}
+                                                    </Text>
+                                                </View>
+                                            </View>
+                                        );
+                                    })}
                                 </View>
                             )}
                         </>
-                    )}
+                    ) : null}
 
                 </BottomSheetScrollView>
             </BottomSheet>
 
-            {/* Modal: cuantas paradas (reusado de pre-APK111, idéntico) */}
+            {/* Modal: cuantas paradas (reusado) */}
             <Modal visible={modalOpen} transparent animationType="fade" onRequestClose={() => setModalOpen(false)}>
                 <View style={s.modalBg}>
                     <View style={s.modalCard}>
@@ -434,19 +525,18 @@ Detectadas: ${resumen.paradas_detectadas ?? 0}`,
 }
 
 /**
- * NOTA PASO 1.B — campo `distrito`:
- * JornadaInfo (types/servicios.ts) todavía no lo exporta. Mientras tanto
- * la UI muestra "—" si no viene. Para completar la fila "Zona" con el
- * distrito real: en el backend `/api/driver/servicios` incluir el campo
- * `jornadas.distrito_nombre` en la jornada embedded. (Fuera del alcance
- * de este sub-step; agrega al PASO 2 o a backend por separado.)
+ * NOTA deuda — campos opcionales del backend:
+ *   · `distrito` (jornada.distrito_nombre) → fila Zona en PRE-INICIO + ACTIVA.
+ *   · `paradas_detectadas_list` (lista paradas_detectadas) → timeline ACTIVA.
+ * Ambos se muestran con fallback "—" / empty-state hasta que el backend
+ * `/api/driver/servicios` los incluya en jornada embedded. El admin
+ * `/api/v3/jornadas/activas` ya los expone (fuente para portar).
  */
 
 const s = StyleSheet.create({
     scrollContent: {
         padding: 16,
-        // El footer anclado ocupa ~84px (btn 56 + padding 10+14 + safe-area).
-        // Reservamos ese espacio al final para que el scroll no quede bajo el CTA.
+        // Reserva para que el scroll no quede bajo el CTA anclado (~84px + safe-area).
         paddingBottom: 120,
     },
     emptyScroll: {
@@ -455,19 +545,7 @@ const s = StyleSheet.create({
     },
     emptyTx: { color: '#6B7280', fontSize: 14 },
 
-    // ── Header ACTIVA (legacy, se rediseña en 1.C) ──────────────────────
-    header: { marginBottom: 12 },
-    headerLabel: {
-        fontSize: 10,
-        fontWeight: '800',
-        color: '#6B7280',
-        letterSpacing: 0.8,
-        marginBottom: 4,
-    },
-    doctor: { fontSize: 18, fontWeight: '800', color: '#0B1F3A' },
-    cliente: { fontSize: 13, color: '#4B5563', marginTop: 2 },
-
-    // ── PASO 1.B — Eyebrow + chip ZURI + turno title ───────────────────
+    // ── Eyebrow + chip ZURI + turno title ──────────────────────────────
     eyebrowRow: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -501,7 +579,7 @@ const s = StyleSheet.create({
         marginBottom: 14,
     },
 
-    // ── PASO 1.B — Tarjeta de jornada ──────────────────────────────────
+    // ── PRE-INICIO: Tarjeta de jornada ─────────────────────────────────
     jornadaCard: {
         backgroundColor: '#ffffff',
         borderRadius: 18,
@@ -575,7 +653,7 @@ const s = StyleSheet.create({
         backgroundColor: '#f1f4f9',
     },
 
-    // ── PASO 1.B — Hint "estás en línea" ───────────────────────────────
+    // ── PRE-INICIO: Hint "estás en línea" ──────────────────────────────
     hintBox: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -609,32 +687,178 @@ const s = StyleSheet.create({
     },
     bannerTx: { fontSize: 13, fontWeight: '700', color: '#92400E' },
 
-    // ── Cards estado ACTIVA (legacy, se rediseña en 1.C) ───────────────
-    card: {
-        backgroundColor: '#fff',
-        borderRadius: 10,
-        padding: 12,
+    // ── PASO 1.C — ACTIVA ─────────────────────────────────────────────
+    // Métrica principal (hero full-width)
+    hero: {
+        backgroundColor: '#ffffff',
+        borderRadius: 18,
+        borderWidth: 1,
+        borderColor: '#eef1f7',
+        paddingVertical: 18,
+        paddingHorizontal: 20,
+        marginBottom: 10,
+        alignItems: 'flex-start',
+        shadowColor: '#0e1726',
+        shadowOpacity: 0.04,
+        shadowRadius: 8,
+        shadowOffset: { width: 0, height: 2 },
+        elevation: 1,
+    },
+    heroLabel: {
+        fontSize: 11,
+        fontWeight: '700',
+        color: '#737f90',
+        letterSpacing: 0.6,
+        textTransform: 'uppercase',
+        marginBottom: 4,
+    },
+    heroValue: {
+        fontSize: 44,
+        fontWeight: '800',
+        color: '#0e1726',
+        letterSpacing: -1,
+        lineHeight: 48,
+        fontVariant: ['tabular-nums'],
+    },
+    heroSub: {
+        fontSize: 13,
+        fontWeight: '600',
+        color: '#737f90',
+        marginTop: 4,
+        fontVariant: ['tabular-nums'],
+    },
+
+    // Fila de 3 métricas (Declaradas / Detectadas / Zona)
+    metricRow: {
+        flexDirection: 'row',
+        gap: 10,
         marginBottom: 10,
     },
-    cardLabel: {
+    metricCard: {
+        flex: 1,
+        backgroundColor: '#ffffff',
+        borderRadius: 15,
+        borderWidth: 1,
+        borderColor: '#eef1f7',
+        paddingVertical: 12,
+        paddingHorizontal: 12,
+    },
+    metricCardLabel: {
         fontSize: 10,
         fontWeight: '700',
-        color: '#6B7280',
+        color: '#737f90',
         letterSpacing: 0.5,
+        textTransform: 'uppercase',
     },
-    cardVal: { fontSize: 15, fontWeight: '700', color: '#0B1F3A', marginTop: 4 },
-    cardBig: { fontSize: 28, fontWeight: '800', color: '#0B1F3A', marginTop: 4, fontVariant: ['tabular-nums'] },
-    row: { flexDirection: 'row', gap: 10, marginBottom: 10 },
-    rowCard: { flex: 1 },
-    estadoParada: {
-        borderRadius: 10,
-        padding: 14,
+    metricCardValueBig: {
+        fontSize: 24,
+        fontWeight: '800',
+        color: '#0e1726',
+        marginTop: 4,
+        fontVariant: ['tabular-nums'],
+    },
+    metricCardValueSmall: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#0e1726',
+        marginTop: 4,
+    },
+
+    // Línea de movimiento
+    movementBox: {
+        flexDirection: 'row',
         alignItems: 'center',
+        gap: 10,
+        paddingVertical: 12,
+        paddingHorizontal: 14,
+        borderRadius: 12,
+        marginBottom: 14,
+    },
+    movementDot: {
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+    },
+    movementTx: {
+        fontSize: 14,
+        fontWeight: '700',
+        flex: 1,
+    },
+
+    // Timeline paradas detectadas
+    sectionTitle: {
+        fontSize: 12,
+        fontWeight: '800',
+        color: '#737f90',
+        letterSpacing: 0.6,
+        textTransform: 'uppercase',
+        marginTop: 4,
+        marginBottom: 8,
+    },
+    timelineEmpty: {
+        padding: 16,
+        borderRadius: 12,
+        backgroundColor: '#f6f8fb',
+        borderWidth: 1,
+        borderColor: '#eef1f7',
+        borderStyle: 'dashed' as any,
+    },
+    timelineEmptyTx: {
+        fontSize: 13,
+        color: '#737f90',
+        textAlign: 'center',
+        lineHeight: 18,
+    },
+    timeline: {
         marginTop: 2,
     },
-    estadoParadaTx: { fontSize: 14, fontWeight: '800', letterSpacing: 0.3 },
+    timelineRow: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    timelineDotCol: {
+        width: 20,
+        alignItems: 'center',
+    },
+    timelineDot: {
+        width: 12,
+        height: 12,
+        borderRadius: 6,
+        marginTop: 4,
+        borderWidth: 2,
+        borderColor: '#ffffff',
+    },
+    timelineDotDone: {
+        backgroundColor: '#0f9d63',
+    },
+    timelineDotActive: {
+        backgroundColor: '#2f54eb',
+    },
+    timelineLine: {
+        flex: 1,
+        width: 2,
+        backgroundColor: '#eef1f7',
+        marginTop: 2,
+        marginBottom: 2,
+    },
+    timelineBody: {
+        flex: 1,
+        paddingBottom: 14,
+    },
+    timelineZona: {
+        fontSize: 14,
+        fontWeight: '700',
+        color: '#0e1726',
+    },
+    timelineMeta: {
+        fontSize: 12,
+        fontWeight: '600',
+        color: '#737f90',
+        marginTop: 2,
+        fontVariant: ['tabular-nums'],
+    },
 
-    // ── Footer anclado (CTA) — compartido con 1.A ──────────────────────
+    // ── Footer anclado (CTA) ───────────────────────────────────────────
     footer: {
         paddingHorizontal: 16,
         paddingTop: 10,
@@ -651,11 +875,11 @@ const s = StyleSheet.create({
         elevation: 2,
     },
     btnPrimary: { backgroundColor: '#0f9d63' },
-    btnDanger: { backgroundColor: '#e04646' },
+    btnDanger: { backgroundColor: '#e04646' }, // PASO 1.C — token stop
     btnDisabled: { opacity: 0.6 },
     btnTx: { color: '#fff', fontSize: 16, fontWeight: '800', letterSpacing: 0.3 },
 
-    // ── Modal paradas (idéntico a pre-APK111) ──────────────────────────
+    // ── Modal paradas ──────────────────────────────────────────────────
     modalBg: {
         flex: 1,
         backgroundColor: 'rgba(15,23,42,0.55)',
