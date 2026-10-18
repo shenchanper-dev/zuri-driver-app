@@ -49,7 +49,7 @@ export const MAP_HTML = `<!DOCTYPE html>
             height: 40px;
             margin-top: -20px;
             margin-left: -20px;
-            background: rgba(15, 157, 99, 0.30);
+            background: rgba(31, 41, 55, 0.18);
             border-radius: 50%;
             animation: zuriPulse 2s infinite;
             z-index: 0;
@@ -136,12 +136,22 @@ export const MAP_HTML = `<!DOCTYPE html>
                 maxZoom: 19,
             }).addTo(map);
 
-            // ── Pin ZURI verde (anillo blanco + sombra) — mockup APK 111 ──
+            // ── SVG car (top-down) — restaurado desde pre-APK111.
+            // Beni pidió volver al auto (como antes). La rotación por heading
+            // sigue funcionando via .core style.transform rotate(deg).
             var carSVG = \`<svg width="40" height="56" viewBox="0 0 40 56" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <ellipse cx="20" cy="48" rx="10" ry="3" fill="rgba(0,0,0,0.22)" />
-  <circle cx="20" cy="24" r="13" fill="#ffffff" />
-  <circle cx="20" cy="24" r="10.5" fill="#0f9d63" stroke="#0b7d4e" stroke-width="1.5" />
-  <circle cx="20" cy="24" r="4.2" fill="#ffffff" fill-opacity="0.55" />
+  <ellipse cx="20" cy="50" rx="12" ry="4" fill="rgba(0,0,0,0.2)" />
+  <polygon points="20,0 26,8 14,8" fill="#1a1a1a" stroke="white" stroke-width="1.2" />
+  <rect x="10" y="8" width="20" height="38" rx="6" ry="6" fill="#1a1a1a" stroke="white" stroke-width="1.5" />
+  <rect x="13" y="13" width="14" height="8" rx="2" fill="#93c5fd" opacity="0.85" stroke="#60a5fa" stroke-width="0.5" />
+  <rect x="13" y="33" width="14" height="6" rx="2" fill="#60a5fa" opacity="0.6" stroke="#3b82f6" stroke-width="0.5" />
+  <rect x="11" y="9" width="4" height="2.5" rx="1" fill="#fde047" stroke="#facc15" stroke-width="0.3" />
+  <rect x="25" y="9" width="4" height="2.5" rx="1" fill="#fde047" stroke="#facc15" stroke-width="0.3" />
+  <rect x="11" y="43" width="4" height="2" rx="0.8" fill="#ef4444" stroke="#dc2626" stroke-width="0.3" />
+  <rect x="25" y="43" width="4" height="2" rx="0.8" fill="#ef4444" stroke="#dc2626" stroke-width="0.3" />
+  <rect x="7" y="16" width="3" height="5" rx="1.5" fill="#1a1a1a" stroke="white" stroke-width="0.8" />
+  <rect x="30" y="16" width="3" height="5" rx="1.5" fill="#1a1a1a" stroke="white" stroke-width="0.8" />
+  <rect x="14" y="22" width="12" height="10" rx="2" fill="#2d2d2d" stroke="#404040" stroke-width="0.5" />
 </svg>\`;
 
             var driverIcon = L.divIcon({
